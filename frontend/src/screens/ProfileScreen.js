@@ -7,34 +7,52 @@ import { useTheme } from '../theme/ThemeContext';
 import { cardStyle, font, radius, softShadow, spacing } from '../theme/tokens';
 import FadeInView from '../components/FadeInView';
 import PrimaryButton from '../components/PrimaryButton';
+import { showSuccessToast, showErrorToast } from '../services/Notifications';
+import { API_BASE_URL } from '../config/api';
 
 export default function ProfileScreen() {
-  const { logout } = useAuth();
+  const { logout, user, updateUser, token } = useAuth();
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const paletteColors = palette;
   const styles = useMemo(() => makeStyles(paletteColors), [paletteColors]);
   const [profile, setProfile] = useState({
-    nombre: 'Camila',
-    telefono: '5551234567',
-    email: 'camila@luminabeauty.com',
+    nombre: user?.nombre || '',
+    telefono: user?.telefono || '',
+    email: user?.email || '',
   });
+  const [isSaving, setIsSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [errors, setErrors] = useState({});
 
-  // Cargar perfil desde API
+  // Refrescar datos del usuario autenticado desde la API
   useEffect(() => {
-    // TODO: Descomentar cuando tenga integración backend completa
-    // const fetchProfile = async () => {
-    //   const token = await getTokenFromStorage();
-    //   const res = await fetch('http://localhost:3000/profile', {
-    //     headers: { Authorization: `Bearer ${token}` }
-    //   });
-    //   const data = await res.json();
-    //   setProfile(data);
-    // };
-    // fetchProfile();
-  }, []);
+    if (!token) return;
+    let active = true;
+    const fetchProfile = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (active && data.user) {
+            setProfile({
+              nombre: data.user.nombre || '',
+              telefono: data.user.telefono || '',
+              email: data.user.email || '',
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching profile:', error);
+      }
+    };
+    fetchProfile();
+    return () => {
+      active = false;
+    };
+  }, [token]);
 
   const validateProfile = () => {
     const errors = {};
@@ -43,8 +61,8 @@ export default function ProfileScreen() {
     }
     if (profile.telefono) {
       const phoneDigits = profile.telefono.replace(/\D/g, '');
-      if (phoneDigits.length !== 10) {
-        errors.telefono = 'Teléfono inválido: 10 dígitos requeridos';
+      if (phoneDigits.length < 7 || phoneDigits.length > 12) {
+        errors.telefono = 'Teléfono inválido: entre 7 y 12 dígitos';
       }
     }
     if (profile.email && !profile.email.includes('@')) {
@@ -56,34 +74,50 @@ export default function ProfileScreen() {
 
   const handleSave = async () => {
     if (!validateProfile()) return;
+    setIsSaving(true);
 
-    // TODO: Descomentar cuando tenga integración backend completa
-    // const res = await fetch('http://localhost:3000/profile', {
-    //   method: 'PUT',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //     'Authorization': `Bearer ${await getTokenFromStorage()}`
-    //   },
-    //   body: JSON.stringify({ nombre: profile.nombre, telefono: profile.telefono })
-    // });
-    //
-    // if (res.ok) {
-    //   const data = await res.json();
-    //   setProfile(data);
-    //   setEditing(false);
-    //   // Toast perfil actualizado
-    //   alert('Perfil actualizado exitosamente');
-    //   // Save to Engram
-    //   // mem_save({ topic_key: `profile/bloomapp/${data.id}`, content: data, type: 'decision' });
-    // } else {
-    //   const errData = await res.json();
-    //   setErrors(errData.errors || { generic: 'Error al guardar' });
-    // }
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ nombre: profile.nombre, telefono: profile.telefono }),
+      });
 
-    // Por ahora, simular save
-    setProfile({ ...profile, nombre: profile.nombre + ' actualizada' });
-    setEditing(false);
-    alert('Perfil simulado actualizado');
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data?.user) {
+        setProfile({
+          nombre: data.user.nombre || profile.nombre,
+          telefono: data.user.telefono || '',
+          email: data.user.email || profile.email,
+        });
+        await updateUser({
+          nombre: data.user.nombre,
+          telefono: data.user.telefono,
+        });
+        showSuccessToast({
+          title: 'Perfil actualizado',
+          description: 'Tus datos fueron actualizados exitosamente',
+        });
+        setEditing(false);
+      } else {
+        showErrorToast({
+          title: 'Error al guardar',
+          description: data?.message || 'No se pudo actualizar el perfil',
+        });
+      }
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      showErrorToast({
+        title: 'Error de conexión',
+        description: 'Por favor intente de nuevo',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleCancel = () => {
@@ -187,8 +221,8 @@ const EditProfileForm = ({ styles, palette, profile, setProfile, onSave, onCance
         keyboardType="phone-pad"
         value={profile.telefono}
         onChangeText={n => setProfile({ ...profile, telefono: n })}
-        placeholder="555-123-4567"
-        maxLength={10}
+        placeholder="0981 123 456"
+        maxLength={12}
       />
       {errors.telefono && <Text style={styles.errorText}>{errors.telefono}</Text>}
     </View>

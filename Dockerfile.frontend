@@ -1,0 +1,25 @@
+# ==========================
+# BLOOMAPP - Dockerfile Frontend (Expo)
+# ==========================
+# node:26 base (Expo SDK 58 requires Node >= 22.13.0).
+# LAYOUT (critical, verified empirically): the frontend project must be
+# THE WORKING DIRECTORY of expo: app.json and src/app at /app root.
+# Expo CLI's router detection (getRouterDirectoryModuleIdWithManifest)
+# inspects <projectRoot>/src/app on the filesystem; if it is missing the
+# manifest/bundle fall back to routerRoot="app", which does not exist,
+# producing zero routes and the default "Welcome to Expo" fallback.
+FROM node:26
+
+WORKDIR /app
+
+COPY frontend/package*.json ./
+
+RUN npm install --no-audit --no-fund
+
+COPY frontend/ ./
+
+EXPOSE 8081
+EXPOSE 19000
+EXPOSE 19001
+
+CMD ["npx", "expo", "start", "-c"]

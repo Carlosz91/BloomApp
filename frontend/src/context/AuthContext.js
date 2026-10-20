@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Toast } from 'expo-toast';
+import { showErrorToast, showSuccessToast } from '../services/Notifications';
+import { API_BASE_URL } from '../config/api';
 
 // Context for JWT token and user auth state
 const AuthContext = createContext();
@@ -30,7 +31,16 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (credentials) => {
-    const res = await fetch('http://localhost:3000/auth/login', {
+    // Validación: correo y contraseña son obligatorios
+    if (!credentials.email || !credentials.password) {
+      showErrorToast({
+        title: 'Credenciales incompletas',
+        description: 'Correo y contraseña son obligatorios',
+      });
+      return;
+    }
+
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(credentials)
@@ -44,18 +54,25 @@ export const AuthProvider = ({ children }) => {
       await AsyncStorage.setItem('bloomapp_user', JSON.stringify(data.user));
     } else {
       const errorData = await res.json();
-      Toast.show({
+      showErrorToast({
         title: 'Error de login',
         description: errorData.message || 'Credenciales inválidas',
-        type: 'error',
-        duration: 3000,
       });
       throw new Error(errorData.message || 'Login failed');
     }
   };
 
   const register = async ({ nombre, email, password }) => {
-    const res = await fetch('http://localhost:3000/auth/register', {
+    // Validación: nombre, correo y contraseña son obligatorios
+    if (!nombre || !email || !password) {
+      showErrorToast({
+        title: 'Campos obligatorios',
+        description: 'Nombre, correo y contraseña son obligatorios',
+      });
+      return;
+    }
+
+    const res = await fetch(`${API_BASE_URL}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nombre, email, password })
@@ -69,11 +86,9 @@ export const AuthProvider = ({ children }) => {
       await AsyncStorage.setItem('bloomapp_user', JSON.stringify(data.user));
     } else {
       const errorData = await res.json();
-      Toast.show({
+      showErrorToast({
         title: 'Error de registro',
         description: errorData.message || 'El registro falló',
-        type: 'error',
-        duration: 3000,
       });
       throw new Error(errorData.message || 'Registro fallido');
     }
@@ -86,22 +101,15 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  const register = async ({ nombre, email }) => {
-    // TODO: Reemplazar por el endpoint real de registro
-    setToken('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock-token');
-    setUser({ id: 1, nombre, email });
-  };
-
-  const logout = async () => {
-    // TODO: Descomentar cuando tenga integración real
-    // await AsyncStorage.removeItem('bloomapp_token');
-    // await AsyncStorage.removeItem('bloomapp_user');
-    // setToken(null);
-    // setUser(null);
-    
-    // Simulación
-    setToken(null);
-    setUser(null);
+  // Update the stored profile (nombre, telefono) after saving to the API.
+  const updateUser = async (partial) => {
+    setUser((prev) => {
+      const next = { ...(prev || {}), ...partial };
+      AsyncStorage.setItem('bloomapp_user', JSON.stringify(next)).catch((error) =>
+        console.error('Error persisting user', error)
+      );
+      return next;
+    });
   };
 
   const value = {
@@ -111,6 +119,7 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
+    updateUser,
   };
 
   return (

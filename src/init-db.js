@@ -52,25 +52,34 @@ function initializeDatabase() {
   `);
   console.log('✅ Tabla "appointments" creada/verificada');
 
-  // Insertar servicios por defecto (solo si la tabla está vacía)
-  const servicesCount = db.prepare('SELECT COUNT(*) FROM services').get().cnt;
-  if (servicesCount === 0) {
-    db.prepare('INSERT INTO services (nombre, descripcion, precio, duracion_minutos, categoria, activo) VALUES (?, ?, ?, ?, ?, ?)').run
-      ('Corte de cejas', 'Corte y forma de cejas', 45.00, 45, 'cejas', 1);
-    db.prepare('INSERT INTO services (nombre, descripcion, precio, duracion_minutos, categoria, activo) VALUES (?, ?, ?, ?, ?, ?)').run
-      ('Tinte de cejas', 'Aplicación de tinte para cejas', 30.00, 30, 'cejas', 1);
-    db.prepare('INSERT INTO services (nombre, descripcion, precio, duracion_minutos, categoria, activo) VALUES (?, ?, ?, ?, ?, ?)').run
-      ('Laminado de cejas', 'Laminado y arreglo de cejas', 60.00, 60, 'cejas', 1);
-    db.prepare('INSERT INTO services (nombre, descripcion, precio, duracion_minutos, categoria, activo) VALUES (?, ?, ?, ?, ?, ?)').run
-      ('Micropigmentación de cejas', 'Micropigmentación natural para cejas', 80.00, 90, 'cejas', 1);
-    console.log('✅ Servicios por defecto insertados');
-  } else {
-    console.log('ℹ️ Servicios ya existían, no se insertaron duplicados');
+  // Catálogo base del salón. Precios enteros en guaraníes (PYG).
+  // Idempotente: inserta cada servicio solo si aún no existe por nombre.
+  const defaultServices = [
+    // Cejas (3)
+    { nombre: 'Perfilado de cejas', descripcion: 'Perfilado y definición de la forma de las cejas', precio: 50000, duracion_minutos: 25, categoria: 'cejas' },
+    { nombre: 'Tinte de cejas', descripcion: 'Tinte para dar densidad y color a las cejas', precio: 60000, duracion_minutos: 30, categoria: 'cejas' },
+    { nombre: 'Laminado de cejas', descripcion: 'Laminado para alinear, fijar y volumizar las cejas', precio: 150000, duracion_minutos: 45, categoria: 'cejas' },
+    // Rostro (2)
+    { nombre: 'Limpieza facial', descripcion: 'Limpieza facial profunda con extracción de puntos negros', precio: 120000, duracion_minutos: 60, categoria: 'rostro' },
+    { nombre: 'Mascarilla facial', descripcion: 'Mascarilla hidratante y revitalizante del rostro', precio: 100000, duracion_minutos: 40, categoria: 'rostro' },
+  ];
+
+  const insertService = db.prepare(
+    'INSERT INTO services (nombre, descripcion, precio, duracion_minutos, categoria, activo) VALUES (?, ?, ?, ?, ?, 1)'
+  );
+  const serviceExists = db.prepare('SELECT COUNT(*) AS cnt FROM services WHERE nombre = ?');
+  let inserted = 0;
+  for (const s of defaultServices) {
+    if (serviceExists.get(s.nombre).cnt === 0) {
+      insertService.run(s.nombre, s.descripcion, s.precio, s.duracion_minutos, s.categoria);
+      inserted += 1;
+    }
   }
+  console.log(inserted === 0 ? 'ℹ️ Catálogo de servicios completo' : `✅ Catálogo de servicios: ${inserted} servicio(s) insertado(s)`);
 
   console.log('\n🎉 Base de datos inicializada exitosamente!');
   console.log('Tablas creadas: users, services, appointments');
-  console.log('Servicios de ejemplo insertados para desarrollo');
+  console.log('Catálogo: 3 servicios de cejas + 2 de rostro (precios en guaraníes)');
 }
 
 initializeDatabase();

@@ -6,7 +6,9 @@ import { useTheme } from '../theme/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { cardStyle, font, radius, spacing } from '../theme/tokens';
 import FadeInView from '../components/FadeInView';
-import { Toast } from 'expo-toast';
+import { showSuccessToast, showErrorToast } from '../services/Notifications';
+import { API_BASE_URL } from '../config/api';
+import { formatGuaranies } from '../utils/format';
 
 export default function MyAppointmentsScreen() {
   const { palette } = useTheme();
@@ -20,12 +22,22 @@ export default function MyAppointmentsScreen() {
   useEffect(() => {
     const fetchAppointments = async () => {
       try {
-        const res = await fetch('http://localhost:3000/appointments', {
+        const res = await fetch(`${API_BASE_URL}/appointments`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!res.ok) throw new Error('Error al cargar citas');
         const data = await res.json();
-        setAppointments(data.appointments || data);
+        // El backend devuelve servicio_nombre/servicio_precio/servicio_duracion planos:
+        // se normalizan a la forma anidada que renderiza la pantalla.
+        const mapped = (data.appointments || data).map((a) => ({
+          ...a,
+          service: {
+            nombre: a.servicio_nombre,
+            precio: a.servicio_precio,
+            duracion_minutos: a.servicio_duracion,
+          },
+        }));
+        setAppointments(mapped);
       } catch (error) {
         console.error('Error fetching appointments:', error);
       }
@@ -37,18 +49,21 @@ export default function MyAppointmentsScreen() {
 
   // Filtrar citas basándose en la fecha actual
   const ahora = new Date();
-  const citasProximas = appointments.filter(c => {
-    const fecha = new Date(c.fecha_hora);
-    return fecha >= ahora && fecha < new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000);
-  });
-
-  const historial = appointments.filter(c => new Date(c.fecha_hora) < ahora);
+  // Próximas: citas activas desde ahora en adelante (sin límite de 30 días)
+  const citasProximas = appointments.filter(
+    c => c.estado === 'booked' && new Date(c.fecha_hora) >= ahora
+  );
+  // Historial: citas pasadas o canceladas
+  const historial = appointments.filter(
+    c => c.estado === 'cancelled' || new Date(c.fecha_hora) < ahora
+  );
 
   const renderAppointment = ({ item: cita, index }) => {
     const fecha = new Date(cita.fecha_hora);
-    const esProxima = cita.estado === 'booked';
-    const badgeColor = esProxima ? palette.primary : palette.success;
-    const badgeTexto = esProxima ? 'Confirmada' : 'Finalizada';
+    const estaCancelada = cita.estado === 'cancelled';
+    const esProxima = !estaCancelada && new Date(cita.fecha_hora) >= ahora;
+    const badgeColor = estaCancelada ? palette.error : esProxima ? palette.primary : palette.success;
+    const badgeTexto = estaCancelada ? 'Cancelada' : esProxima ? 'Confirmada' : 'Finalizada';
 
     return (
       <FadeInView delay={Math.min(index, 8) * 70}>
@@ -56,7 +71,7 @@ export default function MyAppointmentsScreen() {
           <View style={styles.citaInfo}>
             <View style={styles.citaMain}>
               <Text style={styles.serviceName}>{cita.service.nombre}</Text>
-              <Text style={styles.servicePrice}>${cita.service.precio}</Text>
+              <Text style={styles.servicePrice}>{formatGuaranies(cita.service.precio)}</Text>
             </View>
             <View style={[styles.badge, { backgroundColor: badgeColor + '1F' }]}>
               <View style={[styles.badgeDot, { backgroundColor: badgeColor }]} />
@@ -81,7 +96,7 @@ export default function MyAppointmentsScreen() {
 
   const cancelarCita = async (citaId) => {
     try {
-      const res = await fetch(`http://localhost:3000/appointments/${citaId}`, {
+      const res = await fetch(`${API_BASE_URL}/appointments/${citaId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -93,29 +108,23 @@ export default function MyAppointmentsScreen() {
       if (res.ok) {
         setAppointments(prev => prev.map(c => c.id === citaId ? { ...c, estado: 'cancelled', motivo_cancelacion: 'Usuario solicitó cancelación' } : c));
         // Toast cancelación exitosa
-        Toast.show({
+        showSuccessToast({
           title: 'Cita cancelada',
           description: 'La cita ha sido cancelada exitosamente',
-          type: 'success',
-          duration: 3000,
         });
       } else {
         // Toast error
-        Toast.show({
+        showErrorToast({
           title: 'Error al cancelar',
           description: 'No se pudo cancelar la cita',
-          type: 'error',
-          duration: 3000,
         });
       }
     } catch (error) {
       console.error('Error canceling appointment:', error);
       // Toast error de conexión
-      Toast.show({
+      showErrorToast({
         title: 'Error de conexión',
         description: 'Por favor intente de nuevo',
-        type: 'error',
-        duration: 3000,
       });
     }
   };
@@ -126,7 +135,6 @@ export default function MyAppointmentsScreen() {
     <View style={styles.container}>
       <FadeInView style={[styles.header, { paddingTop: insets.top + spacing.xl }]}>
         <Text style={styles.headerTitle}>Mis citas</Text>
-        <Text style={styles.headerSubTitle}>Lúmina Beauty Studio</Text>
       </FadeInView>
 
       <View style={styles.tabs}>
@@ -180,12 +188,6 @@ const makeStyles = (palette) => StyleSheet.create({
     fontSize: 28,
     lineHeight: 34,
     fontFamily: font.semibold,
-  },
-  headerSubTitle: {
-    color: palette.textMuted,
-    fontSize: 14,
-    fontFamily: font.regular,
-    marginTop: spacing.xs,
   },
   tabs: {
     flexDirection: 'row',

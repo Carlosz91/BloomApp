@@ -1,0 +1,69 @@
+# ==========================
+# BLOOMAPP - docker-compose.yml
+# ==========================
+# Backend  (Express + SQLite) -> http://localhost:3000
+# Frontend (Expo Metro)       -> http://localhost:8081
+#
+# Uso:
+#   docker-compose up -d
+#   docker logs -f bloomapp-frontend   <- QR para Expo Go
+#   docker-compose down                <- detener todo
+#
+# La base de datos SQLite persiste en el volumen nombrado `bloomapp-db`.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bloomapp-backend
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - NODE_ENV=development
+      - JWT_SECRET=bloomapp-super-secret-key-change-in-production-32chars
+      - BCRYPT_SALT_ROUNDS=10
+      - DATABASE_URL=/app/data/database.sqlite
+    ports:
+      - "3000:3000"
+    volumes:
+      - bloomapp-db:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: bloomapp-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8081:8081"
+      - "19000:19000"
+      - "19001:19001"
+    environment:
+      # URL del API consignada en el bundle JS; debe ser la IP LAN del host
+      # para que el celular (misma red WiFi) la alcance. localhost NO funciona
+      # en el teléfono: resolvería al propio teléfono.
+      - EXPO_PUBLIC_API_URL=http://192.168.0.13:3000
+      # Hace que Expo anuncie exp://192.168.0.13:8081 (IP del PC) en vez de
+      # la IP interna del contenedor, para que Expo Go conecte al Metro real.
+      - REACT_NATIVE_PACKAGER_HOSTNAME=192.168.0.13
+    volumes:
+      # Código del proyecto en vivo; las rutas (src/app) deben quedar en la
+      # raíz del contenedor para que CLI las detecte. El volumen nombrado
+      # protege node_modules del overlay del bind, y se puebla desde la
+      # imagen la primera vez. Tras cambiar dependencias: docker volume rm.
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    command: ["npx", "expo", "start", "-c"]
+
+volumes:
+  bloomapp-db:
+  frontend_node_modules:

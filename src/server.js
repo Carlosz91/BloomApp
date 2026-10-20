@@ -8,6 +8,9 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const db = require('./db.js');
 
+// Crea/verifica tablas y garantiza el catálogo de servicios en cada arranque (idempotente)
+require('./init-db.js');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -52,13 +55,13 @@ app.post('/auth/register', (req, res) => {
 
     // Generar JWT token
     const jwtSecret = process.env.JWT_SECRET || 'bloomapp-super-secret-key-change-in-production-32chars';
-    const token = jwt.sign({ id: result.lastID, email }, jwtSecret, { expiresIn: '24h' });
+    const token = jwt.sign({ id: Number(result.lastInsertRowid), email }, jwtSecret, { expiresIn: '24h' });
 
     return res.status(201).json({ 
       success: true, 
       message: 'Usuario registrado exitosamente',
       token,
-      user: { id: result.lastID, nombre, email, telefono }
+      user: { id: Number(result.lastInsertRowid), nombre, email, telefono }
     });
   } catch (err) {
     console.error('[ERROR] Register:', err.message);
@@ -128,6 +131,87 @@ app.post('/auth/logout', (req, res) => {
     success: true, 
     message: 'Sesión cerrada exitosamente' 
   });
+});
+
+// GET /auth/me - Devuelve el usuario autenticado (requiere JWT)
+app.get('/auth/me', authenticateToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, email, nombre, telefono FROM users WHERE id = ?').get(req.user.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      });
+    }
+    return res.json({ success: true, user });
+  } catch (err) {
+    console.error('[ERROR] Auth ME:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Error en el servidor'
+    });
+  }
+});
+
+// PUT /auth/profile - Actualizar perfil del usuario autenticado (nombre, telefono)
+app.put('/auth/profile', authenticateToken, (req, res) => {
+  const { nombre, telefono } = req.body || {};
+
+  try {
+    if (nombre !== undefined) {
+      if (typeof nombre !== 'string' || nombre.trim().length < 2) {
+        return res.status(400).json({
+          success: false,
+          message: 'El nombre debe tener al menos 2 caracteres'
+        });
+      }
+    }
+
+    if (telefono !== undefined) {
+      const digits = String(telefono ?? '').replace(/\D/g, '');
+      if (digits.length !== 0 && (digits.length < 7 || digits.length > 12)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Teléfono inválido: debe tener entre 7 y 12 dígitos'
+        });
+      }
+    }
+
+    const updates = [];
+    const values = [];
+    if (nombre !== undefined) {
+      updates.push('nombre = ?');
+      values.push(nombre.trim());
+    }
+    if (telefono !== undefined) {
+      updates.push('telefono = ?');
+      const t = String(telefono ?? '').trim();
+      values.push(t === '' ? null : t);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No hay campos para actualizar'
+      });
+    }
+
+    updates.push('actualizado_en = CURRENT_TIMESTAMP');
+    db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values, req.user.id);
+
+    const user = db.prepare('SELECT id, email, nombre, telefono FROM users WHERE id = ?').get(req.user.id);
+    return res.json({
+      success: true,
+      message: 'Perfil actualizado exitosamente',
+      user
+    });
+  } catch (err) {
+    console.error('[ERROR] Profile PUT:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Error en el servidor al actualizar el perfil'
+    });
+  }
 });
 
 // ==========================================
@@ -224,7 +308,7 @@ app.get('/appointments', authenticateToken, (req, res) => {
       JOIN services s ON a.service_id = s.id
       WHERE a.user_id = ?
       ORDER BY a.fecha_hora DESC
-    `, [req.user.id]).all();
+    `).all(req.user.id);
 
     return res.json({ 
       success: true, 
@@ -262,6 +346,18 @@ app.post('/appointments', authenticateToken, (req, res) => {
       });
     }
 
+    // Verificar cita duplicada: mismo usuario, servicio y horario activo
+    const existingSlot = db.prepare(
+      "SELECT id FROM appointments WHERE user_id = ? AND service_id = ? AND fecha_hora = ? AND estado = 'booked'"
+    ).get(req.user.id, service_id, fecha_hora);
+
+    if (existingSlot) {
+      return res.status(409).json({
+        success: false,
+        message: 'Ya tienes una cita para ese servicio en ese horario'
+      });
+    }
+
     // Insertar cita con estado 'booked'
     const stmt = db.prepare(
       'INSERT INTO appointments (user_id, service_id, fecha_hora, estado) VALUES (?, ?, ?, ?)'
@@ -275,7 +371,7 @@ app.post('/appointments', authenticateToken, (req, res) => {
       FROM appointments a
       JOIN services s ON a.service_id = s.id
       WHERE a.id = ?
-    `, [result.lastID]).get();
+    `).get(Number(result.lastInsertRowid));
 
     return res.status(201).json({ 
       success: true, 
@@ -310,13 +406,13 @@ app.put('/appointments/:id', authenticateToken, (req, res) => {
 
     // Si se proporciona nueva fecha, actualizar
     if (nuevo_fecha_hora) {
-      const stmt = db.prepare('UPDATE appointments SET fecha_hora = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+      const stmt = db.prepare('UPDATE appointments SET fecha_hora = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?');
       stmt.run(nuevo_fecha_hora, id);
     }
 
     // Si se proporciona motivo de cancelación, marcar como cancelada
     if (motivo_cancelacion) {
-      const stmt2 = db.prepare('UPDATE appointments SET estado = ?, motivo_cancelacion = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+      const stmt2 = db.prepare('UPDATE appointments SET estado = ?, motivo_cancelacion = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?');
       stmt2.run('cancelled', motivo_cancelacion, id);
     }
 

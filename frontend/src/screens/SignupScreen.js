@@ -41,9 +41,20 @@ export default function SignupScreen() {
     return Object.keys(next).length === 0;
   };
 
-  const handleSubmit = () => {
+  // Registro con los campos completos del formulario; AuthContext valida y
+  // notifica errores vía toast (credenciales inválidas, problema de red, etc.)
+  const handleSubmit = async () => {
     if (!validate()) return;
-    register({ nombre: form.nombre.trim(), email: form.email.trim() });
+    try {
+      await register({
+        nombre: form.nombre.trim(),
+        email: form.email.trim(),
+        password: form.password,
+      });
+      router.replace('/home');
+    } catch {
+      // Error ya notificado al usuario desde AuthContext
+    }
   };
 
   const goBack = () => (router.canGoBack() ? router.back() : router.replace('/login'));

@@ -32,6 +32,17 @@ export default function LoginScreen() {
 
   const togglePasswordVisibility = () => setShowPassword(!showPassword);
 
+  // Envía exactamente lo que el usuario escribió; AuthContext valida y
+  // muestra el toast de error si algo falla (red, credenciales inválidas).
+  const handleLogin = async () => {
+    try {
+      await login({ email: email.trim(), password });
+      router.replace('/home');
+    } catch {
+      // Error ya notificado al usuario desde AuthContext
+    }
+  };
+
   const inputBox = (name) => [styles.inputBox, focused === name && styles.inputBoxFocused];
 
   return (
@@ -55,7 +66,6 @@ export default function LoginScreen() {
             <Ionicons name="flower" size={40} color={palette.primary} />
           </View>
           <Text style={styles.logoText}>BloomApp</Text>
-          <Text style={styles.sloganText}>LÚMINA BEAUTY STUDIO</Text>
         </FadeInView>
 
         {/* Formulario de login mejorado estéticamente */}
@@ -105,7 +115,7 @@ export default function LoginScreen() {
           {/* Botón de login */}
           <PrimaryButton
             label="Iniciar sesión"
-            onPress={() => login({ nombre: email.split('@')[0] || 'Camila' })}
+            onPress={handleLogin}
             style={styles.loginButton}
           />
         </FadeInView>
@@ -150,13 +160,6 @@ const makeStyles = (palette) =>
       fontSize: 30,
       lineHeight: 36,
       fontFamily: font.semibold,
-    },
-    sloganText: {
-      color: palette.textMuted,
-      fontFamily: font.regular,
-      fontSize: 12,
-      letterSpacing: 1.6,
-      marginTop: spacing.xs,
     },
     formCard: {
       backgroundColor: palette.card,
