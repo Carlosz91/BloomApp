@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo/router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 import { cardStyle, font, radius, spacing } from '../theme/tokens';
 import FadeInView from '../components/FadeInView';
 import PrimaryButton from '../components/PrimaryButton';
+import { Toast } from 'expo-toast';
 
 export default function ScheduleScreen() {
   const router = useRouter();
@@ -90,62 +92,75 @@ export default function ScheduleScreen() {
     setShowTimePicker(false);
   };
 
-  const bookAppointment = async () => {
+const bookAppointment = async () => {
     // Validaciones
     if (!service) {
-      // TODO: Show toast error
-      alert('Por favor seleccione un servicio');
+      setDateError('Por favor seleccione un servicio');
       return;
     }
 
     if (dateError) {
-      alert(dateError);
       return;
     }
 
     if (!selectedDate) {
-      alert('Por favor seleccione una fecha');
+      setDateError('Por favor seleccione una fecha');
       return;
     }
 
     if (!selectedTime) {
-      alert('Por favor seleccione una hora');
+      setDateError('Por favor seleccione una hora');
       return;
     }
 
-    // TODO: Desbloquear cuando tenga auth token del usuario
-    // En producción: POST /appointments con los datos abaixo
-    // const appointmentData = {
-    //   user_id: await getUserIdFromStorage(),
-    //   service_id: service.id,
-    //   fecha_hora: new Date(selectedDate).toISOString(),
-    //   estado: 'booked'
-    // };
+    // En producción: POST /appointments con los datos abajo
+    const appointmentData = {
+      user_id: token?.id || 1,
+      service_id: service.id,
+      fecha_hora: new Date(selectedDate).toISOString(),
+      estado: 'booked',
+    };
 
-    // TODO: Descomentar cuando tenga integración backend completa
-    // const res = await fetch('http://localhost:3000/appointments', {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //     'Authorization': `Bearer ${await getTokenFromStorage()}`
-    //   },
-    //   body: JSON.stringify(appointmentData)
-    // });
-    //
-    // if (res.ok) {
-    //   const data = await res.json();
-    //   // Toast éxito reserva
-    //   alert('¡Cita agendada exitosamente!');
-    //   router.push('/appointments');
-    // } else {
-    //   const err = await res.json();
-    //   // Toast error
-    //   alert('Error al agendar: ' + (err.detail || 'Intente de nuevo'));
-    // }
+    try {
+      const res = await fetch('http://localhost:3000/appointments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(appointmentData),
+      });
 
-    // Por ahora, simulamos el éxito y navegamos
-    alert(`Cita simulada para ${service.nombre} el ${selectedDate.toLocaleDateString()} a las ${selectedTime}`);
-    router.push('/appointments');
+      if (res.ok) {
+        const data = await res.json();
+        // Toast éxito reserva
+        Toast.show({
+          title: 'Cita agendada',
+          description: 'Tu cita ha sido confirmada exitosamente',
+          type: 'success',
+          duration: 3000,
+        });
+        router.push('/appointments');
+      } else {
+        const err = await res.json();
+        // Toast error
+        Toast.show({
+          title: 'Error al agendar',
+          description: err.detail || 'Intente de nuevo',
+          type: 'error',
+          duration: 3000,
+        });
+      }
+    } catch (error) {
+      console.error('Error booking appointment:', error);
+      // Toast error de conexión
+      Toast.show({
+        title: 'Error de conexión',
+        description: 'Por favor intente de nuevo',
+        type: 'error',
+        duration: 3000,
+      });
+    }
   };
 
   if (!service) {

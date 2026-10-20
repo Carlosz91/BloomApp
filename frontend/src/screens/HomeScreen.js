@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 import { cardStyle, font, radius, spacing } from '../theme/tokens';
 import FadeInView from '../components/FadeInView';
 
@@ -16,21 +17,29 @@ export default function HomeScreen() {
   const [services, setServices] = useState([]);
   const [filteredServices, setFilteredServices] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const { token } = useAuth();
 
-  // Cargar servicios - en producción llamada a API GET /services con JWT
-  // Por ahora usar mock data estructurada con colores de la palette
+  // Cargar servicios desde API real
   useEffect(() => {
-    const mockServices = [
-      { id: 1, nombre: 'Corte de cejas', descripcion: 'Corte y forma de cejas', precio: 45.00, duracion_minutos: 45, categoria: 'cejas', activo: true },
-      { id: 2, nombre: 'Tinte de cejas', descripcion: 'Aplicación de tinte para cejas', precio: 30.00, duracion_minutos: 30, categoria: 'cejas', activo: true },
-      { id: 3, nombre: 'Laminado de cejas', descripcion: 'Laminado y arreglo de cejas', precio: 60.00, duracion_minutos: 60, categoria: 'cejas', activo: true },
-      { id: 4, nombre: 'Micropigmentación de cejas', descripcion: 'Micropigmentación natural para cejas', precio: 80.00, duracion_minutos: 90, categoria: 'cejas', activo: true },
-      { id: 5, nombre: 'Limpieza de piel', descripcion: 'Limpieza facial profunda', precio: 55.00, duracion_minutos: 60, categoria: 'rostro', activo: true },
-    ];
-    setServices(mockServices);
-    setFilteredServices(mockServices);
-    setIsLoading(false);
-  }, [palette]);
+    const fetchServices = async () => {
+      try {
+        const res = await fetch('http://localhost:3000/services', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Error al cargar servicios');
+        const data = await res.json();
+        setServices(data.services || data);
+        setFilteredServices(data.services || data);
+      } catch (error) {
+        console.error('Error fetching services:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (token) fetchServices();
+    else setIsLoading(false);
+  }, [token]);
 
   const renderService = ({ item, index }) => (
     <FadeInView delay={Math.min(index, 8) * 70}>

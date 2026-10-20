@@ -3,8 +3,10 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 import { cardStyle, font, radius, spacing } from '../theme/tokens';
 import FadeInView from '../components/FadeInView';
+import { Toast } from 'expo-toast';
 
 export default function MyAppointmentsScreen() {
   const { palette } = useTheme();
@@ -12,46 +14,26 @@ export default function MyAppointmentsScreen() {
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const [appointments, setAppointments] = useState([]);
   const [filter, setFilter] = useState('proximas'); // 'proximas' | 'historial'
+  const { token } = useAuth();
 
   // Cargar citas del usuario desde API
   useEffect(() => {
-    // TODO: Descomentar cuando tenga integración backend completa
-    // const fetchAppointments = async () => {
-    //   const token = await getTokenFromStorage();
-    //   const res = await fetch('http://localhost:3000/appointments', {
-    //     headers: { Authorization: `Bearer ${token}` }
-    //   });
-    //   const data = await res.json();
-    //   setAppointments(data);
-    // };
-    // fetchAppointments();
+    const fetchAppointments = async () => {
+      try {
+        const res = await fetch('http://localhost:3000/appointments', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Error al cargar citas');
+        const data = await res.json();
+        setAppointments(data.appointments || data);
+      } catch (error) {
+        console.error('Error fetching appointments:', error);
+      }
+    };
 
-    // Datos mock por ahora
-    const mockAppointments = [
-      {
-        id: 1,
-        service: { nombre: 'Corte de cejas', precio: 45.00, categoria: 'cejas' },
-        fecha_hora: '2026-11-15T09:00:00.000Z',
-        estado: 'booked',
-        motivo_cancelacion: null,
-      },
-      {
-        id: 2,
-        service: { nombre: 'Limpieza de piel', precio: 55.00, categoria: 'rostro' },
-        fecha_hora: '2026-10-01T14:30:00.000Z',
-        estado: 'completed',
-        motivo_cancelacion: null,
-      },
-      {
-        id: 3,
-        service: { nombre: 'Tinte de cejas', precio: 30.00, categoria: 'cejas' },
-        fecha_hora: '2026-12-01T11:00:00.000Z',
-        estado: 'booked',
-        motivo_cancelacion: null,
-      },
-    ];
-    setAppointments(mockAppointments);
-  }, []);
+    if (token) fetchAppointments();
+    else setAppointments([]);
+  }, [token]);
 
   // Filtrar citas basándose en la fecha actual
   const ahora = new Date();
@@ -98,26 +80,44 @@ export default function MyAppointmentsScreen() {
   };
 
   const cancelarCita = async (citaId) => {
-    // TODO: Descomentar cuando tenga integración backend completa
-    // const res = await fetch(`http://localhost:3000/appointments/${citaId}`, {
-    //   method: 'PUT',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //     'Authorization': `Bearer ${await getTokenFromStorage()}`
-    //   },
-    //   body: JSON.stringify({ estado: 'cancelled', motivo_cancelacion: 'Usuario solicitó cancelación' })
-    // });
-    //
-    // if (res.ok) {
-    //   setAppointments(prev => prev.map(c => c.id === citaId ? { ...c, estado: 'cancelled', motivo_cancelacion: 'Usuario solicitó cancelación' } : c));
-    //   // Toast cancelación exitosa
-    //   alert('Cita cancelada exitosamente');
-    // } else {
-    //   alert('Error al cancelar la cita');
-    // }
+    try {
+      const res = await fetch(`http://localhost:3000/appointments/${citaId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ estado: 'cancelled', motivo_cancelacion: 'Usuario solicitó cancelación' }),
+      });
 
-    // Por ahora, simular cancelación
-    alert('Cita simulada cancelada #' + citaId);
+      if (res.ok) {
+        setAppointments(prev => prev.map(c => c.id === citaId ? { ...c, estado: 'cancelled', motivo_cancelacion: 'Usuario solicitó cancelación' } : c));
+        // Toast cancelación exitosa
+        Toast.show({
+          title: 'Cita cancelada',
+          description: 'La cita ha sido cancelada exitosamente',
+          type: 'success',
+          duration: 3000,
+        });
+      } else {
+        // Toast error
+        Toast.show({
+          title: 'Error al cancelar',
+          description: 'No se pudo cancelar la cita',
+          type: 'error',
+          duration: 3000,
+        });
+      }
+    } catch (error) {
+      console.error('Error canceling appointment:', error);
+      // Toast error de conexión
+      Toast.show({
+        title: 'Error de conexión',
+        description: 'Por favor intente de nuevo',
+        type: 'error',
+        duration: 3000,
+      });
+    }
   };
 
   const listData = filter === 'proximas' ? citasProximas : historial;
