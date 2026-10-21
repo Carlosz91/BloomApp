@@ -6,6 +6,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { query, queryOne, queryMany } = require('./db.js');
@@ -27,6 +28,13 @@ if (!JWT_SECRET) {
     process.exit(1);
   }
   console.warn('[WARN] JWT_SECRET not set; using insecure development fallback');
+}
+
+// Google sign-in (optional at boot): the endpoint degrades to 503 when the
+// client ID is not configured instead of taking the whole API down.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+if (!GOOGLE_CLIENT_ID) {
+  console.warn('[WARN] GOOGLE_CLIENT_ID not set; Google sign-in disabled');
 }
 
 // Middlewares
@@ -60,6 +68,13 @@ const registerLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Demasiados registros. Probá de nuevo más tarde' }
+});
+const googleLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Demasiados intentos con Google. Probá de nuevo en 15 minutos' }
 });
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -198,6 +213,90 @@ app.post('/auth/login', loginLimiter, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Error en el servidor al iniciar sesión'
+    });
+  }
+});
+
+// POST /auth/google - Exchange a Google ID token for a BloomApp session
+// Body: { idToken }. Verification runs against Google's tokeninfo endpoint
+// and the aud claim must match GOOGLE_CLIENT_ID. Users are upserted by email;
+// existing accounts keep their regular password login behavior.
+app.post('/auth/google', googleLimiter, async (req, res) => {
+  try {
+    const idToken = typeof req.body.idToken === 'string' ? req.body.idToken.trim() : '';
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'idToken es obligatorio'
+      });
+    }
+    if (!GOOGLE_CLIENT_ID) {
+      return res.status(503).json({
+        success: false,
+        message: 'Login con Google no está configurado'
+      });
+    }
+
+    // Verify with Google: the endpoint returns claims only for valid,
+    // unexpired tokens issued to a client of this project.
+    const verifyUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`;
+    const googleRes = await fetch(verifyUrl);
+    if (!googleRes.ok) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token de Google inválido'
+      });
+    }
+    const claims = await googleRes.json();
+    if (
+      claims.aud !== GOOGLE_CLIENT_ID ||
+      String(claims.email_verified).toLowerCase() !== 'true' ||
+      !claims.email
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token de Google inválido'
+      });
+    }
+
+    const email = String(claims.email).trim().toLowerCase();
+    const fallbackNombre = email.split('@')[0] || 'Usuario';
+    const nombre = String(claims.name || fallbackNombre).trim().slice(0, 60);
+    const nombreFinal = nombre.length >= 2 ? nombre : 'Usuario';
+
+    const existingResult = await queryOne('SELECT * FROM users WHERE email = $1', [email]);
+    let user;
+    if (existingResult.row) {
+      user = existingResult.row;
+    } else {
+      // Store an unguessable random hash so Google-only accounts can never be
+      // logged into with a password guess (there is no password to recover).
+      const opaque = crypto.randomBytes(32).toString('hex');
+      const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS) || 10;
+      const passwordHash = bcrypt.hashSync(opaque, saltRounds);
+      const insertResult = await query(
+        "INSERT INTO users (nombre, email, password_hash, telefono, genero) VALUES ($1, $2, $3, NULL, '') RETURNING *",
+        [nombreFinal, email, passwordHash]
+      );
+      user = insertResult.rows[0];
+    }
+
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET || JWT_DEV_FALLBACK, { expiresIn: '24h' });
+
+    // Responder sin password_hash
+    const { password_hash, ...userWithoutPassword } = user;
+
+    return res.json({
+      success: true,
+      message: 'Inicio de sesión con Google exitoso',
+      token,
+      user: userWithoutPassword
+    });
+  } catch (err) {
+    console.error('[ERROR] Google login:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Error en el servidor al iniciar sesión con Google'
     });
   }
 });

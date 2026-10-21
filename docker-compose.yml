@@ -24,6 +24,8 @@ services:
       - JWT_SECRET=bloomapp-super-secret-key-change-in-production-32chars
       - BCRYPT_SALT_ROUNDS=10
       - DATABASE_URL=postgres://bloomapp:bloomapp@postgres:5432/bloomapp
+      # OAuth web client ID (Google Cloud Console); empty until configured
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
     depends_on:
       postgres:
         condition: service_healthy
