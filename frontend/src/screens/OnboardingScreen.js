@@ -90,7 +90,7 @@ export default function OnboardingScreen() {
   const router = useRouter();
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const styles = useMemo(() => makeStyles(palette), [palette]);
 
   const listRef = useRef(null);
@@ -139,6 +139,11 @@ export default function OnboardingScreen() {
   const ctaDisabled = termsUnresolved || (isTerms && !termsChecked);
 
   const heroSize = Math.min(width * 0.62, 260);
+  // Explicit bounded height for the terms scroller: nested flex:1 inside a
+  // horizontal FlatList item does not reliably constrain on web, leaving the
+  // panel with zero overflow (nothing to scroll). Window-derived explicit
+  // height makes the scrollable region deterministic on every viewport.
+  const termsScrollHeight = Math.max(280, Math.min(560, height - 380));
 
   // Entrance + ambient loops (floating icon, pulsing halo)
   useEffect(() => {
@@ -234,7 +239,7 @@ export default function OnboardingScreen() {
             Necesitamos tu consentimiento explícito antes de continuar.
           </Text>
           <ScrollView
-            style={[styles.termsScroll, { maxWidth: 560 }]}
+            style={[styles.termsScroll, { height: termsScrollHeight, maxWidth: 560 }]}
             contentContainerStyle={styles.termsScrollInner}
             nestedScrollEnabled
             showsVerticalScrollIndicator
@@ -449,7 +454,6 @@ const makeStyles = (palette) =>
     dot: { height: DOT_SIZE, borderRadius: DOT_SIZE / 2, marginHorizontal: 4 },
     termsEyebrow: { marginTop: spacing.md },
     termsScroll: {
-      flex: 1,
       backgroundColor: palette.card,
       borderRadius: 20,
       marginTop: spacing.md,
