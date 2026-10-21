@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Switch } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Switch, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -190,7 +190,14 @@ export default function ProfileScreen() {
   };
 
   const abrirWhatsApp = () => {
-    // Abre WhatsApp (app o web) con el número del estudio y mensaje ya armado.
+    // Nativo: deep-link directo a la app de WhatsApp con mensaje armado.
+    // Web: navegación en la MISMA pestaña — window.open(_blank) deja al
+    // usuario varado en el intersticial de api.whatsapp.com ("webhook"),
+    // y el botón atrás del navegador es la salida clara de vuelta a la app.
+    if (Platform.OS === 'web') {
+      window.location.assign(WHATSAPP_URL);
+      return;
+    }
     Linking.openURL(WHATSAPP_URL).catch(() => {});
   };
 
@@ -295,6 +302,8 @@ export default function ProfileScreen() {
             <View style={styles.contactInfo}>
               <Text style={styles.contactTitulo}>¿Tenés una consulta?</Text>
               <Text style={styles.contactTexto}>Escribinos por WhatsApp y te ayudamos.</Text>
+              {/* Número visible: el usuario no adivina a quién va a contactar. */}
+              <Text style={styles.contactNumero}>+595 982 143 176</Text>
             </View>
             <TouchableOpacity style={styles.contactButton} onPress={abrirWhatsApp}>
               <Text style={styles.contactButtonText}>Contactar</Text>
@@ -353,7 +362,8 @@ const EditProfileForm = ({ styles, palette, profile, setProfile, onSave, onCance
         value={profile.telefono}
         onChangeText={n => setProfile({ ...profile, telefono: n })}
         placeholder="0981 123 456"
-        maxLength={12}
+        // 16 caracteres: permite '+595' y espacios sin cortar el número.
+        maxLength={16}
       />
       {errors.telefono && <Text style={styles.errorText}>{errors.telefono}</Text>}
     </View>
@@ -680,6 +690,12 @@ const makeStyles = (paletteColors) => StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     fontFamily: font.regular,
+    marginTop: 4,
+  },
+  contactNumero: {
+    color: '#43594e',
+    fontSize: 12,
+    fontFamily: font.semibold,
     marginTop: 4,
   },
   contactButton: {
