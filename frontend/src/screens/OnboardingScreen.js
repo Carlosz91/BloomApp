@@ -3,11 +3,13 @@ import {
   Animated,
   Easing,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,6 +41,48 @@ const STEPS = [
   },
 ];
 
+// --- Términos y condiciones (aceptación obligatoria, por versión) ---
+const TERMS_VERSION = 'v1';
+const TERMS_DATE = '21 de octubre de 2026';
+const TERMS_STORAGE_KEY = 'bloomapp_terms_accept';
+const TERMS_STEP = { key: 'terms', type: 'terms' };
+
+// TODO(product): replace the contact email once the business mailbox exists.
+const TERMS_CONTACT = 'soporte@bloomapp.com';
+
+const TERMS_SECTIONS = [
+  {
+    key: 'intro',
+    heading: 'La app',
+    body: 'BloomApp es una plataforma para gestionar turnos y reservas de servicios de estética (cejas y tratamientos faciales). Al crear una cuenta o usar la app aceptás estos Términos y Condiciones.',
+  },
+  {
+    key: 'datos',
+    heading: 'Uso de tus datos',
+    body: 'Para brindarte el servicio tratamos: nombre, correo electrónico y, si usás el acceso con Google, el perfil básico que autorices; más el historial de tus citas. Usamos esa información exclusivamente para crear tu cuenta, gestionar tus reservas (incluyendo cancelaciones y confirmaciones) y comunicaciones operativas del negocio. No vendemos ni cedemos tus datos a terceros con fines publicitarios.',
+  },
+  {
+    key: 'ia',
+    heading: 'Uso de Inteligencia Artificial',
+    body: 'BloomApp fue desarrollado y se mantiene con ayuda de herramientas basadas en Inteligencia Artificial (generación y revisión de código, pruebas, y redacción de contenidos de la app), siempre bajo supervisión y decisión humana del equipo. Si incorporamos funciones de recomendación automatizada que usen tus datos, te lo avisaremos de forma clara antes de activarlas y tu consentimiento será necesario.',
+  },
+  {
+    key: 'derechos',
+    heading: 'Tus derechos',
+    body: `Podés solicitar una copia de tus datos, su corrección o la eliminación de tu cuenta escribiendo a ${TERMS_CONTACT}. Atenderemos la solicitud en un plazo razonable conforme a la normativa de protección de datos personal aplicable.`,
+  },
+  {
+    key: 'uso',
+    heading: 'Uso responsable',
+    body: 'Debés ser mayor de 18 años (o contar con autorización de quien ejerce tu representación legal), mantener la confidencialidad de tus credenciales y usar la app solo con fines de consumo personal y honestos de los servicios ofrecidos. Las reservas están sujetas a la disponibilidad real del calendario del salón y pueden ser reagendadas o canceladas si corresponde.',
+  },
+  {
+    key: 'cambios',
+    heading: 'Cambios del acuerdo',
+    body: 'Estos términos se identifican con una versión y fecha (v1 del 21 de octubre de 2026). Si los actualizamos, la app te mostrará nuevamente el pedido de aceptación antes de que uses tu cuenta.',
+  },
+];
+
 const DOT_SIZE = 8;
 const DOT_ACTIVE_WIDTH = 28;
 
@@ -56,8 +100,44 @@ export default function OnboardingScreen() {
   const float = useState(() => new Animated.Value(0))[0];
   const pulse = useState(() => new Animated.Value(0))[0];
   const [index, setIndex] = useState(0);
+  const [termsChecked, setTermsChecked] = useState(false);
+  // Whether the legal terms step is required for this visit. While we read
+  // AsyncStorage the value stays 'loading' and the CTA stays disabled.
+  const [termsState, setTermsState] = useState('loading');
 
-  const isLast = index === STEPS.length - 1;
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(TERMS_STORAGE_KEY)
+      .then((stored) => {
+        if (cancelled) return;
+        let accepted = false;
+        if (stored) {
+          try {
+            accepted = JSON.parse(stored).version === TERMS_VERSION;
+          } catch {
+            accepted = false;
+          }
+        }
+        setTermsState(accepted ? 'accepted' : 'needed');
+      })
+      .catch(() => {
+        if (!cancelled) setTermsState('needed');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The legal step is appended only when consent is still missing so users
+  // go through it once per terms version.
+  const effectiveSteps = termsState === 'needed' ? [...STEPS, TERMS_STEP] : STEPS;
+  const currentStep = effectiveSteps[Math.min(index, effectiveSteps.length - 1)];
+  const isTerms = currentStep.type === 'terms';
+
+  const isLast = index === effectiveSteps.length - 1;
+  const termsUnresolved = termsState === 'loading';
+  const ctaDisabled = termsUnresolved || (isTerms && !termsChecked);
+
   const heroSize = Math.min(width * 0.62, 260);
 
   // Entrance + ambient loops (floating icon, pulsing halo)
@@ -97,10 +177,10 @@ export default function OnboardingScreen() {
         useNativeDriver: true,
         listener: (e) => {
           const next = Math.round(e.nativeEvent.contentOffset.x / width);
-          setIndex((prev) => (next !== prev && next >= 0 && next < STEPS.length ? next : prev));
+          setIndex((prev) => (next !== prev && next >= 0 && next < effectiveSteps.length ? next : prev));
         },
       }),
-    [scrollX, width]
+    [scrollX, width, effectiveSteps.length]
   );
 
   useEffect(() => {
@@ -114,6 +194,17 @@ export default function OnboardingScreen() {
   };
 
   const handleNext = () => {
+    if (isTerms) {
+      if (!termsChecked) return;
+      // Consent is recorded first; navigation proceeds even if storage
+      // fails because the accepted version is already known in memory.
+      AsyncStorage.setItem(
+        TERMS_STORAGE_KEY,
+        JSON.stringify({ version: TERMS_VERSION, acceptedAt: new Date().toISOString() })
+      ).catch(() => {});
+      router.replace('/login');
+      return;
+    }
     if (isLast) {
       router.replace('/login');
     } else {
@@ -125,9 +216,57 @@ export default function OnboardingScreen() {
     if (index > 0) goTo(index - 1);
   };
 
-  const handleSkip = () => router.replace('/login');
+  // Skipping must never bypass the legal gate; the button is also hidden.
+  const handleSkip = () => {
+    if (isTerms) return;
+    router.replace('/login');
+  };
 
   const renderStep = ({ item, index: i }) => {
+    // Legal consent step: long-form scrollable terms with a required
+    // explicit acceptance checkbox. Replaces the intro-page layout.
+    if (item.type === 'terms') {
+      return (
+        <View style={[styles.page, { width }]}>
+          <Text style={[styles.eyebrow, styles.termsEyebrow]}>LEGAL</Text>
+          <Text style={styles.title}>Términos y condiciones</Text>
+          <Text style={styles.description}>
+            Necesitamos tu consentimiento explícito antes de continuar.
+          </Text>
+          <ScrollView
+            style={[styles.termsScroll, { maxWidth: 560 }]}
+            contentContainerStyle={styles.termsScrollInner}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+          >
+            {TERMS_SECTIONS.map((section) => (
+              <View key={section.key} style={styles.termsSection}>
+                <Text style={styles.termsHeading}>{section.heading}</Text>
+                <Text style={styles.termsBody}>{section.body}</Text>
+              </View>
+            ))}
+            <Text style={styles.termsFootnote}>BloomApp · Términos {TERMS_VERSION} · {TERMS_DATE}</Text>
+          </ScrollView>
+          <Pressable
+            onPress={() => setTermsChecked((checked) => !checked)}
+            style={[styles.termsCheckboxRow, { maxWidth: 560 }, termsChecked && styles.termsCheckboxRowActive]}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: termsChecked }}
+          >
+            <Ionicons
+              name={termsChecked ? 'checkmark-circle' : 'ellipse-outline'}
+              size={24}
+              color={termsChecked ? palette.primary : palette.textMuted}
+            />
+            <Text style={styles.termsCheckboxLabel}>
+              He leído y acepto los Términos y Condiciones, el uso de mis datos según lo descrito y el empleo de
+              herramientas de Inteligencia Artificial en la app.
+            </Text>
+          </Pressable>
+        </View>
+      );
+    }
+
     const range = [(i - 1) * width, i * width, (i + 1) * width];
     const heroScale = scrollX.interpolate({ inputRange: range, outputRange: [0.65, 1, 0.65], extrapolate: 'clamp' });
     const heroOpacity = scrollX.interpolate({ inputRange: range, outputRange: [0, 1, 0], extrapolate: 'clamp' });
@@ -185,7 +324,8 @@ export default function OnboardingScreen() {
         },
       ]}
     >
-      {/* Top bar: back / skip */}
+      {/* Top bar: back / skip. Skip is removed on the legal step: consent
+          must be explicit, there is no way to bypass the acceptance. */}
       <View style={styles.topBar}>
         <Pressable
           onPress={handleBack}
@@ -199,9 +339,9 @@ export default function OnboardingScreen() {
         </Pressable>
         <Pressable
           onPress={handleSkip}
-          disabled={isLast}
+          disabled={isLast || isTerms}
           hitSlop={12}
-          style={[styles.topButton, isLast && styles.hidden]}
+          style={[styles.topButton, (isLast || isTerms) && styles.hidden]}
           accessibilityLabel="Saltar"
         >
           <Text style={styles.topButtonText}>Saltar</Text>
@@ -210,7 +350,7 @@ export default function OnboardingScreen() {
 
       <Animated.FlatList
         ref={listRef}
-        data={STEPS}
+        data={effectiveSteps}
         keyExtractor={(item) => item.key}
         renderItem={renderStep}
         horizontal
@@ -226,7 +366,7 @@ export default function OnboardingScreen() {
       {/* Pagination + CTA */}
       <View style={styles.footer}>
         <View style={styles.dots}>
-          {STEPS.map((step, i) => {
+          {effectiveSteps.map((step, i) => {
             const dotWidth = activeAnim.interpolate({
               inputRange: [i - 1, i, i + 1],
               outputRange: [DOT_SIZE, DOT_ACTIVE_WIDTH, DOT_SIZE],
@@ -246,9 +386,10 @@ export default function OnboardingScreen() {
           })}
         </View>
         <PrimaryButton
-          label={isLast ? 'Empezar' : 'Siguiente'}
-          icon={isLast ? 'checkmark' : 'arrow-forward'}
+          label={isTerms ? 'Aceptar y continuar' : 'Empezar'}
+          icon={isTerms ? 'checkmark' : 'arrow-forward'}
           onPress={handleNext}
+          disabled={ctaDisabled}
         />
       </View>
     </Animated.View>
@@ -306,4 +447,58 @@ const makeStyles = (palette) =>
     footer: { paddingHorizontal: spacing.xl, alignItems: 'stretch' },
     dots: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', height: 12, marginBottom: spacing.xl },
     dot: { height: DOT_SIZE, borderRadius: DOT_SIZE / 2, marginHorizontal: 4 },
+    termsEyebrow: { marginTop: spacing.md },
+    termsScroll: {
+      flex: 1,
+      backgroundColor: palette.card,
+      borderRadius: 20,
+      marginTop: spacing.md,
+      marginBottom: spacing.md,
+      paddingHorizontal: spacing.lg,
+    },
+    termsScrollInner: { paddingVertical: spacing.lg },
+    termsSection: { marginBottom: spacing.md },
+    termsHeading: {
+      fontFamily: font.semibold,
+      fontSize: 14,
+      lineHeight: 20,
+      color: palette.heading || palette.textPrimary,
+      marginBottom: 4,
+    },
+    termsBody: {
+      fontFamily: font.regular,
+      fontSize: 13,
+      lineHeight: 20,
+      color: palette.textMuted,
+    },
+    termsFootnote: {
+      fontFamily: font.medium || font.regular,
+      fontSize: 12,
+      color: palette.textMuted,
+      textAlign: 'center',
+      marginTop: spacing.sm,
+      marginBottom: spacing.md,
+    },
+    termsCheckboxRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: palette.line || palette.border,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      backgroundColor: palette.card,
+      marginBottom: spacing.md,
+    },
+    termsCheckboxRowActive: {
+      borderColor: palette.primary,
+    },
+    termsCheckboxLabel: {
+      flex: 1,
+      marginLeft: spacing.sm,
+      fontFamily: font.regular,
+      fontSize: 13,
+      lineHeight: 18,
+      color: palette.textPrimary,
+    },
   });
