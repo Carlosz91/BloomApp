@@ -62,6 +62,39 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Exchange a Google ID token (already signature-verified by our backend)
+  // for a BloomApp JWT session. Persistence mirrors login() exactly.
+  const loginWithGoogle = async (idToken) => {
+    if (!idToken) {
+      showErrorToast({
+        title: 'Google',
+        description: 'No se recibió el token de Google',
+      });
+      return;
+    }
+
+    const res = await fetch(`${API_BASE_URL}/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setToken(data.token);
+      setUser(data.user);
+      await AsyncStorage.setItem('bloomapp_token', data.token);
+      await AsyncStorage.setItem('bloomapp_user', JSON.stringify(data.user));
+    } else {
+      const errorData = await res.json();
+      showErrorToast({
+        title: 'Error con Google',
+        description: errorData.message || 'No se pudo iniciar sesión con Google',
+      });
+      throw new Error(errorData.message || 'Google login failed');
+    }
+  };
+
   const register = async ({ nombre, email, password }) => {
     // Validación: nombre, correo y contraseña son obligatorios
     if (!nombre || !email || !password) {
@@ -117,6 +150,7 @@ export const AuthProvider = ({ children }) => {
     user,
     isLoading,
     login,
+    loginWithGoogle,
     register,
     logout,
     updateUser,

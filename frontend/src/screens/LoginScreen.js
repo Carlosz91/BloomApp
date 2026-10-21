@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,14 +13,69 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { font, radius, softShadow, spacing } from '../theme/tokens';
 import FadeInView from '../components/FadeInView';
 import PrimaryButton from '../components/PrimaryButton';
 
+// Completes the redirect window when this page IS the OAuth popup landing
+// page; harmless no-op on any other load. Required for web popup flows.
+WebBrowser.maybeCompleteAuthSession();
+
+// Google sign-in is web-only in this phase: native builds require a
+// development build (custom native code) and are supported by the same
+// backend endpoint. The button is rendered only for web + configured client.
+const GOOGLE_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '';
+const GOOGLE_ENABLED = Platform.OS === 'web' && Boolean(GOOGLE_CLIENT_ID);
+const GOOGLE_DISCOVERY = {
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+};
+
+// OAuth button for web only. Isolated component keeps the auth hooks alive
+// in their own render tree so the main screen stays hook-safe without the
+// Google flow.
+function GoogleSignInButton({ palette, styles, busy, onIdToken }) {
+  const redirectUri = AuthSession.makeRedirectUri({ preferLocalhost: true });
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: GOOGLE_CLIENT_ID,
+      redirectUri,
+      scopes: ['openid', 'profile', 'email'],
+      responseType: AuthSession.ResponseType.IdToken,
+      selectAccount: true,
+    },
+    GOOGLE_DISCOVERY
+  );
+
+  useEffect(() => {
+    if (response?.type === 'success' && response.params?.id_token) {
+      onIdToken(response.params.id_token);
+    }
+  }, [response, onIdToken]);
+
+  const disabled = busy || !request;
+
+  return (
+    <TouchableOpacity
+      style={[styles.googleButton, disabled && styles.googleButtonDisabled]}
+      onPress={() => promptAsync()}
+      disabled={disabled}
+      activeOpacity={0.8}
+    >
+      <View style={styles.googleIconWrap}>
+        <Ionicons name="logo-google" size={20} color="#DB4437" />
+      </View>
+      <Text style={styles.googleButtonText}>Continuar con Google</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function LoginScreen() {
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const router = useRouter();
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
@@ -29,6 +84,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState(null);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   const togglePasswordVisibility = () => setShowPassword(!showPassword);
 
@@ -40,6 +96,20 @@ export default function LoginScreen() {
       router.replace('/home');
     } catch {
       // Error ya notificado al usuario desde AuthContext
+    }
+  };
+
+  // Recibe el id_token ya emitido por Google y lo intercambia por una
+  // sesión BloomApp en el backend (AuthContext maneja errores con toast).
+  const handleGoogleIdToken = async (idToken) => {
+    setGoogleBusy(true);
+    try {
+      await loginWithGoogle(idToken);
+      router.replace('/home');
+    } catch {
+      // Error ya notificado al usuario desde AuthContext
+    } finally {
+      setGoogleBusy(false);
     }
   };
 
@@ -118,6 +188,23 @@ export default function LoginScreen() {
             onPress={handleLogin}
             style={styles.loginButton}
           />
+
+          {/* Login con Google: solo web con client ID configurado */}
+          {GOOGLE_ENABLED && (
+            <View style={styles.googleSection}>
+              <View style={styles.orDivider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.orText}>o</Text>
+                <View style={styles.dividerLine} />
+              </View>
+              <GoogleSignInButton
+                palette={palette}
+                styles={styles}
+                busy={googleBusy}
+                onIdToken={handleGoogleIdToken}
+              />
+            </View>
+          )}
         </FadeInView>
 
         {/* Enlace de registro */}
@@ -206,6 +293,45 @@ const makeStyles = (palette) =>
     },
     togglePassword: { paddingLeft: spacing.sm },
     loginButton: { marginTop: spacing.md },
+    googleSection: { marginTop: spacing.lg },
+    orDivider: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing.md,
+    },
+    dividerLine: { flex: 1, height: 1, backgroundColor: palette.border },
+    orText: {
+      color: palette.textMuted,
+      fontFamily: font.regular,
+      fontSize: 13,
+      marginHorizontal: spacing.sm,
+    },
+    googleButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 56,
+      borderRadius: radius.lg,
+      backgroundColor: palette.card,
+      borderWidth: 1.5,
+      borderColor: palette.border,
+      paddingHorizontal: spacing.md,
+    },
+    googleButtonDisabled: { opacity: 0.6 },
+    googleIconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: palette.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: spacing.sm,
+    },
+    googleButtonText: {
+      color: palette.textPrimary,
+      fontFamily: font.semibold,
+      fontSize: 15,
+    },
     footer: { alignItems: 'center', marginTop: spacing.xl },
     dividerText: { color: palette.textMuted, fontFamily: font.regular, fontSize: 14, textAlign: 'center' },
     signupLink: { marginTop: spacing.sm, padding: spacing.sm, alignItems: 'center' },

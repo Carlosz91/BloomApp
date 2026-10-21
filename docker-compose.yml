@@ -74,6 +74,8 @@ services:
       # Hace que Expo anuncie exp://<LAN_IP>:8081 (IP del PC) en vez de la IP
       # interna del contenedor, para que Expo Go conecte al Metro real.
       - REACT_NATIVE_PACKAGER_HOSTNAME=${LAN_IP:-192.168.0.8}
+      # Google OAuth web client ID para el botón web de login (mismo valor)
+      - EXPO_PUBLIC_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
     volumes:
       # Código del proyecto en vivo; las rutas (src/app) deben quedar en la
       # raíz del contenedor para que CLI las detecte. El volumen nombrado
