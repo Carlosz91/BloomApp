@@ -224,10 +224,11 @@ app.post('/auth/login', loginLimiter, async (req, res) => {
 app.post('/auth/google', googleLimiter, async (req, res) => {
   try {
     const idToken = typeof req.body.idToken === 'string' ? req.body.idToken.trim() : '';
-    if (!idToken) {
+    const nonce = typeof req.body.nonce === 'string' ? req.body.nonce.trim() : '';
+    if (!idToken || !nonce) {
       return res.status(400).json({
         success: false,
-        message: 'idToken es obligatorio'
+        message: 'idToken y nonce son obligatorios'
       });
     }
     if (!GOOGLE_CLIENT_ID) {
@@ -248,10 +249,13 @@ app.post('/auth/google', googleLimiter, async (req, res) => {
       });
     }
     const claims = await googleRes.json();
+    // Nonce anti-replay: the token must be bound to the exact browser flow
+    // that generated it, otherwise a captured token could be replayed.
     if (
       claims.aud !== GOOGLE_CLIENT_ID ||
       String(claims.email_verified).toLowerCase() !== 'true' ||
-      !claims.email
+      !claims.email ||
+      String(claims.nonce || '') !== nonce
     ) {
       return res.status(401).json({
         success: false,

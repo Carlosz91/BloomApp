@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
+import * as Crypto from 'expo-crypto';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { font, radius, softShadow, spacing } from '../theme/tokens';
@@ -38,7 +39,7 @@ const GOOGLE_DISCOVERY = {
 // OAuth button for web only. Isolated component keeps the auth hooks alive
 // in their own render tree so the main screen stays hook-safe without the
 // Google flow.
-function GoogleSignInButton({ palette, styles, busy, onIdToken }) {
+function GoogleSignInButton({ palette, styles, busy, nonce, onIdToken }) {
   const redirectUri = AuthSession.makeRedirectUri({ preferLocalhost: true });
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
     {
@@ -46,16 +47,25 @@ function GoogleSignInButton({ palette, styles, busy, onIdToken }) {
       redirectUri,
       scopes: ['openid', 'profile', 'email'],
       responseType: AuthSession.ResponseType.IdToken,
-      selectAccount: true,
+      // Implicit (id_token) responses reject PKCE params on Google's side
+      // ("code_challenge_method not allowed for this message type").
+      usePKCE: false,
+      // Google enforces a nonce for id_token implicit flows; the nonce is
+      // embedded in the returned token and the backend cross-checks that
+      // it matches this exact browser session (anti-replay).
+      extraParams: nonce ? { nonce } : {},
+      // Force Google's account chooser: without it, Google silently
+      // reuses whatever account the browser already remembers.
+      prompt: AuthSession.Prompt.SelectAccount,
     },
     GOOGLE_DISCOVERY
   );
 
   useEffect(() => {
     if (response?.type === 'success' && response.params?.id_token) {
-      onIdToken(response.params.id_token);
+      onIdToken(response.params.id_token, nonce);
     }
-  }, [response, onIdToken]);
+  }, [response, onIdToken, nonce]);
 
   const disabled = busy || !request;
 
@@ -85,6 +95,27 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState(null);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [googleNonce, setGoogleNonce] = useState('');
+
+  // Google requires a nonce for implicit id_token flows. It is generated
+  // fresh for every screen load and binds the token to this browser
+  // session, letting the backend detect captured-token replays.
+  useEffect(() => {
+    if (!GOOGLE_ENABLED) return undefined;
+    let cancelled = false;
+    Crypto.getRandomBytesAsync(16).then((bytes) => {
+      if (!cancelled) {
+        setGoogleNonce(
+          Array.from(bytes)
+            .map((byte) => byte.toString(16).padStart(2, '0'))
+            .join('')
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const togglePasswordVisibility = () => setShowPassword(!showPassword);
 
@@ -99,12 +130,13 @@ export default function LoginScreen() {
     }
   };
 
-  // Recibe el id_token ya emitido por Google y lo intercambia por una
-  // sesión BloomApp en el backend (AuthContext maneja errores con toast).
-  const handleGoogleIdToken = async (idToken) => {
+  // Recibe el id_token ya emitido por Google junto con el nonce generado
+  // en esta misma carga de pantalla, y los intercambia por una sesión
+  // BloomApp en el backend (AuthContext maneja errores con toast).
+  const handleGoogleIdToken = async (idToken, nonce) => {
     setGoogleBusy(true);
     try {
-      await loginWithGoogle(idToken);
+      await loginWithGoogle({ idToken, nonce });
       router.replace('/home');
     } catch {
       // Error ya notificado al usuario desde AuthContext
@@ -189,8 +221,10 @@ export default function LoginScreen() {
             style={styles.loginButton}
           />
 
-          {/* Login con Google: solo web con client ID configurado */}
-          {GOOGLE_ENABLED && (
+          {/* Login con Google: solo web con client ID configurado.
+              El botón espera al nonce: sin él Google rechaza el flujo
+              id_token y el backend no podría validar el token. */}
+          {GOOGLE_ENABLED && googleNonce && (
             <View style={styles.googleSection}>
               <View style={styles.orDivider}>
                 <View style={styles.dividerLine} />
@@ -201,6 +235,7 @@ export default function LoginScreen() {
                 palette={palette}
                 styles={styles}
                 busy={googleBusy}
+                nonce={googleNonce}
                 onIdToken={handleGoogleIdToken}
               />
             </View>

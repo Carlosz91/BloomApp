@@ -64,8 +64,10 @@ export const AuthProvider = ({ children }) => {
 
   // Exchange a Google ID token (already signature-verified by our backend)
   // for a BloomApp JWT session. Persistence mirrors login() exactly.
-  const loginWithGoogle = async (idToken) => {
-    if (!idToken) {
+  // The nonce binds the token to the browser session that requested it
+  // and the backend rejects any mismatch (anti-replay).
+  const loginWithGoogle = async ({ idToken, nonce }) => {
+    if (!idToken || !nonce) {
       showErrorToast({
         title: 'Google',
         description: 'No se recibió el token de Google',
@@ -76,7 +78,7 @@ export const AuthProvider = ({ children }) => {
     const res = await fetch(`${API_BASE_URL}/auth/google`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken })
+      body: JSON.stringify({ idToken, nonce })
     });
 
     if (res.ok) {
