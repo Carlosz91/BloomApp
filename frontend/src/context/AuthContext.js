@@ -1,7 +1,14 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { showErrorToast, showSuccessToast } from '../services/Notifications';
 import { API_BASE_URL } from '../config/api';
+
+// Idle timeout for ending a session with no user interaction at all. Keep in
+// sync with the backend SESSION_TTL_SECONDS (sliding safety net): the backend
+// only expires on the next request, while this timer IS the proactive logout
+// that lands the user on login without touching anything.
+const SESSION_INACTIVITY_MS = 180 * 1000;
 
 // Context for JWT token and user auth state
 const AuthContext = createContext();
@@ -107,6 +114,66 @@ export const AuthProvider = ({ children }) => {
       handleSessionExpired = null;
     };
   }, []);
+
+  // Last moment a real human interaction happened. The session ends from user
+  // inactivity, never from app-generated traffic (background refreshes,
+  // screen mounts, etc. do not count as activity). Initialized by the
+  // effects below instead of at declaration: Date.now() is impure during
+  // render.
+  const lastUserActivityRef = useRef(null);
+
+  // Web: every real interaction resets the idle window.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return undefined;
+    lastUserActivityRef.current = Date.now();
+    const markActivity = () => {
+      lastUserActivityRef.current = Date.now();
+    };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
+    events.forEach((eventName) => window.addEventListener(eventName, markActivity, { passive: true }));
+    return () => {
+      events.forEach((eventName) => window.removeEventListener(eventName, markActivity));
+    };
+  }, []);
+
+  // Native: there is no global touch hook, so foreground transitions are the
+  // activity signal. Returning to the app after longer than the idle window
+  // closes the session immediately; shorter returns just refresh it.
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+    lastUserActivityRef.current = Date.now();
+    const subscription = AppState.addEventListener('change', (status) => {
+      if (status !== 'active') return;
+      const elapsedIdleMs = Date.now() - lastUserActivityRef.current;
+      if (lastUserActivityRef.current && elapsedIdleMs > SESSION_INACTIVITY_MS) {
+        if (handleSessionExpired) handleSessionExpired();
+        return;
+      }
+      lastUserActivityRef.current = Date.now();
+    });
+    return () => {
+      if (subscription) subscription.remove();
+    };
+  }, []);
+
+  // Web ticker: while a session exists, the idle window is checked every 30s
+  // so the app routes itself to login with zero interaction. On native a
+  // foregrounded-idle logout cannot be distinguished from active use, so
+  // expiry stays request-driven plus the AppState resume check above.
+  useEffect(() => {
+    if (!token) return undefined;
+    lastUserActivityRef.current = Date.now();
+    const ticker = setInterval(() => {
+      if (
+        Platform.OS === 'web' &&
+        handleSessionExpired &&
+        Date.now() - lastUserActivityRef.current > SESSION_INACTIVITY_MS
+      ) {
+        handleSessionExpired();
+      }
+    }, 30 * 1000);
+    return () => clearInterval(ticker);
+  }, [token]);
 
   const login = async (credentials) => {
     // Validación: correo y contraseña son obligatorios
