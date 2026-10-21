@@ -142,8 +142,9 @@ export default function OnboardingScreen() {
   // Explicit bounded height for the terms scroller: nested flex:1 inside a
   // horizontal FlatList item does not reliably constrain on web, leaving the
   // panel with zero overflow (nothing to scroll). Window-derived explicit
-  // height makes the scrollable region deterministic on every viewport.
-  const termsScrollHeight = Math.max(280, Math.min(560, height - 380));
+  // height makes the scrollable region deterministic on every viewport. The
+  // checkbox lives inside the scroll so short viewports never clip it out.
+  const termsScrollHeight = Math.max(240, Math.min(560, height - 360));
 
   // Entrance + ambient loops (floating icon, pulsing halo)
   useEffect(() => {
@@ -235,9 +236,13 @@ export default function OnboardingScreen() {
         <View style={[styles.page, { width }]}>
           <Text style={[styles.eyebrow, styles.termsEyebrow]}>LEGAL</Text>
           <Text style={styles.title}>Términos y condiciones</Text>
-          <Text style={styles.description}>
-            Necesitamos tu consentimiento explícito antes de continuar.
-          </Text>
+          {/* On short windows the tagline would push the scroller below the
+              visible area: hide it when the viewport is compact. */}
+          {height >= 640 && (
+            <Text style={styles.description}>
+              Necesitamos tu consentimiento explícito antes de continuar.
+            </Text>
+          )}
           <ScrollView
             style={[styles.termsScroll, { height: termsScrollHeight, maxWidth: 560 }]}
             contentContainerStyle={styles.termsScrollInner}
@@ -251,23 +256,27 @@ export default function OnboardingScreen() {
               </View>
             ))}
             <Text style={styles.termsFootnote}>BloomApp · Términos {TERMS_VERSION} · {TERMS_DATE}</Text>
+            {/* The checkbox lives INSIDE the scroller so it can never be
+                clipped out of reach on short viewports: reaching the end of
+                the terms always exposes the acceptance control. */}
+            <Pressable
+              onPress={() => setTermsChecked((checked) => !checked)}
+              style={[styles.termsCheckboxRow, termsChecked && styles.termsCheckboxRowActive]}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: termsChecked }}
+            >
+              <Ionicons
+                name={termsChecked ? 'checkmark-circle' : 'ellipse-outline'}
+                size={24}
+                color={termsChecked ? palette.primary : palette.textMuted}
+              />
+              <Text style={styles.termsCheckboxLabel}>
+                He leído y acepto los Términos y Condiciones, el uso de mis datos según lo descrito y el empleo de
+                herramientas de Inteligencia Artificial en la app.
+              </Text>
+            </Pressable>
+            <View style={styles.termsScrollTrail} />
           </ScrollView>
-          <Pressable
-            onPress={() => setTermsChecked((checked) => !checked)}
-            style={[styles.termsCheckboxRow, { maxWidth: 560 }, termsChecked && styles.termsCheckboxRowActive]}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: termsChecked }}
-          >
-            <Ionicons
-              name={termsChecked ? 'checkmark-circle' : 'ellipse-outline'}
-              size={24}
-              color={termsChecked ? palette.primary : palette.textMuted}
-            />
-            <Text style={styles.termsCheckboxLabel}>
-              He leído y acepto los Términos y Condiciones, el uso de mis datos según lo descrito y el empleo de
-              herramientas de Inteligencia Artificial en la app.
-            </Text>
-          </Pressable>
         </View>
       );
     }
@@ -391,8 +400,10 @@ export default function OnboardingScreen() {
           })}
         </View>
         <PrimaryButton
-          label={isTerms ? 'Aceptar y continuar' : 'Empezar'}
-          icon={isTerms ? 'checkmark' : 'arrow-forward'}
+          // Siguiente avanza entre slides; el paso legal requiere aceptar
+          // (disabled hasta marcar), y el último sin términos inicia login.
+          label={isTerms ? 'Aceptar y continuar' : isLast ? 'Empezar' : 'Siguiente'}
+          icon={isTerms || isLast ? 'checkmark' : 'arrow-forward'}
           onPress={handleNext}
           disabled={ctaDisabled}
         />
@@ -505,4 +516,5 @@ const makeStyles = (palette) =>
       lineHeight: 18,
       color: palette.textPrimary,
     },
+    termsScrollTrail: { height: spacing.md },
   });
