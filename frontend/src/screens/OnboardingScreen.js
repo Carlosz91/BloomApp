@@ -46,6 +46,10 @@ const TERMS_VERSION = 'v1';
 const TERMS_DATE = '21 de octubre de 2026';
 const TERMS_STORAGE_KEY = 'bloomapp_terms_accept';
 const TERMS_STEP = { key: 'terms', type: 'terms' };
+// One-shot marker: once set, the intro slides are not replayed on later
+// visits; the app goes straight to login (reinstall or cache clear resets it,
+// and a new TERMS_VERSION brings the terms step back by itself).
+const ONBOARDING_DONE_KEY = 'bloomapp_onboarding_done';
 
 // TODO(product): replace the contact email once the business mailbox exists.
 const TERMS_CONTACT = 'soporte@bloomapp.com';
@@ -104,11 +108,18 @@ export default function OnboardingScreen() {
   // Whether the legal terms step is required for this visit. While we read
   // AsyncStorage the value stays 'loading' and the CTA stays disabled.
   const [termsState, setTermsState] = useState('loading');
+  // Entry decision: 'loading' -> 'show' (first run or pending terms) or
+  // 'skip' (returning visit with consent already recorded and no new legal
+  // version to accept).
+  const [entry, setEntry] = useState('loading');
 
   useEffect(() => {
     let cancelled = false;
-    AsyncStorage.getItem(TERMS_STORAGE_KEY)
-      .then((stored) => {
+    Promise.all([
+      AsyncStorage.getItem(TERMS_STORAGE_KEY),
+      AsyncStorage.getItem(ONBOARDING_DONE_KEY),
+    ])
+      .then(([stored, doneStored]) => {
         if (cancelled) return;
         let accepted = false;
         if (stored) {
@@ -119,14 +130,27 @@ export default function OnboardingScreen() {
           }
         }
         setTermsState(accepted ? 'accepted' : 'needed');
+        if (doneStored && accepted) {
+          // Returning user, nothing legally pending: straight to login.
+          setEntry('skip');
+        } else {
+          setEntry('show');
+        }
       })
       .catch(() => {
-        if (!cancelled) setTermsState('needed');
+        if (!cancelled) {
+          setTermsState('needed');
+          setEntry('show');
+        }
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (entry === 'skip') router.replace('/login');
+  }, [entry, router]);
 
   // The legal step is appended only when consent is still missing so users
   // go through it once per terms version.
@@ -199,6 +223,15 @@ export default function OnboardingScreen() {
     listRef.current?.scrollToOffset({ offset: target * width, animated: true });
   };
 
+  // One-shot completion marker: any finished (or deliberately skipped)
+  // onboarding means later visits land directly on login.
+  const markOnboardingDone = () => {
+    AsyncStorage.setItem(
+      ONBOARDING_DONE_KEY,
+      JSON.stringify({ doneAt: new Date().toISOString() })
+    ).catch(() => {});
+  };
+
   const handleNext = () => {
     if (isTerms) {
       if (!termsChecked) return;
@@ -208,10 +241,12 @@ export default function OnboardingScreen() {
         TERMS_STORAGE_KEY,
         JSON.stringify({ version: TERMS_VERSION, acceptedAt: new Date().toISOString() })
       ).catch(() => {});
+      markOnboardingDone();
       router.replace('/login');
       return;
     }
     if (isLast) {
+      markOnboardingDone();
       router.replace('/login');
     } else {
       goTo(index + 1);
@@ -225,6 +260,7 @@ export default function OnboardingScreen() {
   // Skipping must never bypass the legal gate; the button is also hidden.
   const handleSkip = () => {
     if (isTerms) return;
+    markOnboardingDone();
     router.replace('/login');
   };
 
@@ -325,6 +361,10 @@ export default function OnboardingScreen() {
       </View>
     );
   };
+
+  // Skipping users never see this screen: while 'loading' nothing is painted
+  // (brief hold), and once 'skip' the navigation already replaced the route.
+  if (entry !== 'show') return null;
 
   return (
     <Animated.View
