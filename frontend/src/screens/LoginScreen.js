@@ -222,9 +222,10 @@ export default function LoginScreen() {
           />
 
           {/* Login con Google: solo web con client ID configurado.
-              El botón espera al nonce: sin él Google rechaza el flujo
-              id_token y el backend no podría validar el token. */}
-          {GOOGLE_ENABLED && googleNonce && (
+              Boolean() es clave: si googleNonce aún es '' (primer render,
+              el nonce async no llegó), `&&` devolvería una cadena vacía y
+              React la trataría como text node dentro del View card. */}
+          {GOOGLE_ENABLED && Boolean(googleNonce) && (
             <View style={styles.googleSection}>
               <View style={styles.orDivider}>
                 <View style={styles.dividerLine} />
