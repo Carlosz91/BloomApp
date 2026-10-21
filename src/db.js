@@ -45,6 +45,13 @@ async function runMigrations() {
     END $$;
   `);
 
+  // Migration: server-side terms acceptance audit. The device copy of the
+  // acceptance (AsyncStorage) is only a UX cache for the pre-login onboarding
+  // step; the DB columns are the durable legal proof of who accepted v1 and
+  // when. Idempotent: PostgreSQL supports ADD COLUMN IF NOT EXISTS since 9.6.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version VARCHAR(10)`);
+
   // Table services - service catalog (Fase 3+)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS services (

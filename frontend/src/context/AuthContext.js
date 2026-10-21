@@ -6,10 +6,65 @@ import { API_BASE_URL } from '../config/api';
 // Context for JWT token and user auth state
 const AuthContext = createContext();
 
+// ---- Session plumbing (module scope) ---------------------------------------
+// The backend runs sliding inactivity sessions: every authenticated response
+// carries a freshly signed token in the `X-Auth-Token` header and activity is
+// the only thing keeping the session alive. This wrapper adopts the renewed
+// token transparently and logs out when an authenticated call expires, so no
+// screen needs to know about the mechanism. Also mirrors the terms version
+// constant in OnboardingScreen (bump both together).
+const TERMS_VERSION = 'v1';
+let adoptFreshSessionToken = null;
+let handleSessionExpired = null;
+
+if (!globalThis.__bloomSessionFetchInstalled) {
+  globalThis.__bloomSessionFetchInstalled = true;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const response = await originalFetch(input, init);
+    // Only authenticated calls participate in the session lifecycle.
+    const initHeaders = (init && init.headers) || null;
+    const headerNames = initHeaders ? Object.keys(initHeaders).map(String) : [];
+    const hadAuthHeader = headerNames.some((name) => /authorization/i.test(name));
+    if (hadAuthHeader) {
+      const freshToken = response.headers?.get?.('x-auth-token');
+      // 401/403 on an authenticated call means the inactivity window closed
+      // (or the token was rejected): the session is over, log out.
+      if (response.status === 401 || response.status === 403) {
+        if (handleSessionExpired) handleSessionExpired();
+      } else if (freshToken && adoptFreshSessionToken) {
+        adoptFreshSessionToken(freshToken);
+      }
+    }
+    return response;
+  };
+}
+
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Upload the device-recorded onboarding acceptance to the server once per
+  // session: the DB row is the durable legal proof, the device copy is only a
+  // UX cache for the pre-login flow. Best-effort and silent; a failed attempt
+  // retries on the next successful login because /auth/me shows the missing
+  // record.
+  const syncTermsAcceptance = async (authToken, userFromServer) => {
+    try {
+      if (!authToken || !userFromServer || userFromServer.terms_accepted_at) return;
+      const stored = await AsyncStorage.getItem('bloomapp_terms_accept');
+      const acceptance = stored ? JSON.parse(stored) : null;
+      if (!acceptance || acceptance.version !== TERMS_VERSION) return;
+      await fetch(`${API_BASE_URL}/auth/terms-accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ version: acceptance.version })
+      });
+    } catch (error) {
+      console.error('Error syncing terms acceptance', error);
+    }
+  };
 
   // Try to read token from storage on mount
   useEffect(() => {
@@ -17,10 +72,12 @@ export const AuthProvider = ({ children }) => {
       try {
         const storedToken = await AsyncStorage.getItem('bloomapp_token');
         const storedUser = await AsyncStorage.getItem('bloomapp_user');
-        
+        const parsedUser = storedUser ? JSON.parse(storedUser) : null;
+
         setToken(storedToken);
-        setUser(storedUser ? JSON.parse(storedUser) : null);
+        setUser(parsedUser);
         setIsLoading(false);
+        syncTermsAcceptance(storedToken, parsedUser);
       } catch (error) {
         console.error('Error loading auth state', error);
         setIsLoading(false);
@@ -28,6 +85,27 @@ export const AuthProvider = ({ children }) => {
     };
 
     loadAuthState();
+  }, []);
+
+  useEffect(() => {
+    // Plug the sliding-session plumbing into this mounted provider.
+    adoptFreshSessionToken = async (freshToken) => {
+      if (!freshToken) return;
+      setToken(freshToken);
+      AsyncStorage.setItem('bloomapp_token', freshToken).catch((error) =>
+        console.error('Error persisting sliding token', error)
+      );
+    };
+    handleSessionExpired = () => {
+      AsyncStorage.removeItem('bloomapp_token').catch(() => {});
+      AsyncStorage.removeItem('bloomapp_user').catch(() => {});
+      setToken(null);
+      setUser(null);
+    };
+    return () => {
+      adoptFreshSessionToken = null;
+      handleSessionExpired = null;
+    };
   }, []);
 
   const login = async (credentials) => {
@@ -52,6 +130,7 @@ export const AuthProvider = ({ children }) => {
       setUser(data.user);
       await AsyncStorage.setItem('bloomapp_token', data.token);
       await AsyncStorage.setItem('bloomapp_user', JSON.stringify(data.user));
+      syncTermsAcceptance(data.token, data.user);
     } else {
       const errorData = await res.json();
       showErrorToast({
@@ -87,6 +166,7 @@ export const AuthProvider = ({ children }) => {
       setUser(data.user);
       await AsyncStorage.setItem('bloomapp_token', data.token);
       await AsyncStorage.setItem('bloomapp_user', JSON.stringify(data.user));
+      syncTermsAcceptance(data.token, data.user);
     } else {
       const errorData = await res.json();
       showErrorToast({
@@ -119,6 +199,7 @@ export const AuthProvider = ({ children }) => {
       setUser(data.user);
       await AsyncStorage.setItem('bloomapp_token', data.token);
       await AsyncStorage.setItem('bloomapp_user', JSON.stringify(data.user));
+      syncTermsAcceptance(data.token, data.user);
     } else {
       const errorData = await res.json();
       showErrorToast({

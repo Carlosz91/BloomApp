@@ -37,6 +37,25 @@ if (!GOOGLE_CLIENT_ID) {
   console.warn('[WARN] GOOGLE_CLIENT_ID not set; Google sign-in disabled');
 }
 
+// Session TTL: signing-in issues a short-lived token, and every authenticated
+// request releases a freshly signed one (sliding window). A user inactive for
+// longer than TTL expires their session; the next authenticated call fails
+// and the client logs out. Configurable for future policy changes without a
+// code change.
+const SESSION_TTL_SECONDS = parseInt(process.env.SESSION_TTL_SECONDS, 10) || 180;
+
+// Canonical terms version the server is willing to record. Bump when legal
+// text changes and re-run the onboarding flow (the client compares versions).
+const TERMS_VERSION = 'v1';
+
+// Response header carrying the renewed session token after each request.
+const SESSION_TOKEN_HEADER = 'X-Auth-Token';
+
+// Single sign site for session tokens so every token (login, register,
+// Google, and the sliding renewals in the middleware) shares the same TTL.
+const signSessionToken = (payload) =>
+  jwt.sign(payload, JWT_SECRET || JWT_DEV_FALLBACK, { expiresIn: SESSION_TTL_SECONDS });
+
 // Middlewares
 // Security headers (no HTML is served; CSP defaults are harmless for the API).
 app.use(helmet());
@@ -48,7 +67,9 @@ app.use(cors({
     const allowed = (process.env.CLIENT_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (!origin || allowed.length === 0 || allowed.includes(origin)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
-  }
+  },
+  // Web clients must be able to read the sliding-session renewal header.
+  exposedHeaders: [SESSION_TOKEN_HEADER]
 }));
 app.use(express.json({ limit: '10kb' }));
 
@@ -145,7 +166,7 @@ app.post('/auth/register', registerLimiter, async (req, res) => {
     const newUserId = Number(result.rows[0].id);
 
     // Generar JWT token
-    const token = jwt.sign({ id: newUserId, email }, JWT_SECRET || JWT_DEV_FALLBACK, { expiresIn: '24h' });
+    const token = signSessionToken({ id: newUserId, email });
 
     return res.status(201).json({
       success: true,
@@ -197,7 +218,7 @@ app.post('/auth/login', loginLimiter, async (req, res) => {
     }
 
     // Generar JWT token
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET || JWT_DEV_FALLBACK, { expiresIn: '24h' });
+    const token = signSessionToken({ id: user.id, email: user.email });
 
     // Responder sin password_hash
     const { password_hash, ...userWithoutPassword } = user;
@@ -285,7 +306,7 @@ app.post('/auth/google', googleLimiter, async (req, res) => {
       user = insertResult.rows[0];
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET || JWT_DEV_FALLBACK, { expiresIn: '24h' });
+    const token = signSessionToken({ id: user.id, email: user.email });
 
     // Responder sin password_hash
     const { password_hash, ...userWithoutPassword } = user;
@@ -317,7 +338,7 @@ app.post('/auth/logout', (req, res) => {
 app.get('/auth/me', authenticateToken, async (req, res) => {
   try {
     const userResult = await queryOne(
-      'SELECT id, email, nombre, telefono, genero FROM users WHERE id = $1',
+      'SELECT id, email, nombre, telefono, genero, terms_accepted_at, terms_version FROM users WHERE id = $1',
       [req.user.id]
     );
     if (!userResult.row) {
@@ -329,6 +350,44 @@ app.get('/auth/me', authenticateToken, async (req, res) => {
     return res.json({ success: true, user: userResult.row });
   } catch (err) {
     console.error('[ERROR] Auth ME:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Error en el servidor'
+    });
+  }
+});
+
+// POST /auth/terms-accept - Registra la aceptación legal de términos en la BD.
+// El cliente la sube una vez tras el primer login posterior al onboarding
+// (donde se aceptó localmente). La copia del dispositivo es solo caché de UX;
+// este registro es la prueba duradera de aceptación con fecha y versión.
+app.post('/auth/terms-accept', authenticateToken, async (req, res) => {
+  try {
+    const version = typeof req.body?.version === 'string' ? req.body.version.trim() : TERMS_VERSION;
+    if (version !== TERMS_VERSION) {
+      return res.status(400).json({
+        success: false,
+        message: 'Versión de términos inválida'
+      });
+    }
+    const updated = await queryOne(
+      'UPDATE users SET terms_accepted_at = CURRENT_TIMESTAMP, terms_version = $1 WHERE id = $2 RETURNING terms_accepted_at, terms_version',
+      [version, req.user.id]
+    );
+    if (!updated.row) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      });
+    }
+    return res.json({
+      success: true,
+      message: 'Aceptación de términos registrada',
+      terms_accepted_at: updated.row.terms_accepted_at,
+      terms_version: updated.row.terms_version
+    });
+  } catch (err) {
+    console.error('[ERROR] Terms accept:', err.message);
     return res.status(500).json({
       success: false,
       message: 'Error en el servidor'
@@ -436,6 +495,10 @@ function authenticateToken(req, res, next) {
       message: 'Token inválido'
     });
     req.user = user;
+    // Sliding session: every verified request releases a token with a fresh
+    // TTL window. The client adopts it from X-Auth-Token (exposed via CORS),
+    // so activity keeps the session alive while pure idle time expires it.
+    res.set(SESSION_TOKEN_HEADER, signSessionToken({ id: user.id, email: user.email }));
     next();
   });
 }
@@ -732,6 +795,7 @@ app.listen(PORT, () => {
   console.log('  POST /auth/register  - Registrar usuario (Fase 1)');
   console.log('  POST /auth/login     - Iniciar sesión (Fase 1)');
   console.log('  POST /auth/logout    - Cerrar sesión');
+  console.log('  POST /auth/terms-accept - Registrar aceptación de términos (requiere JWT)');
   console.log('  GET /health          - Verificar estado');
   console.log('  GET /services        - Listar servicios (Fase 3+)');
   console.log('  GET /appointments    - Ver mis citas (Fase 3+, requiere JWT)');
