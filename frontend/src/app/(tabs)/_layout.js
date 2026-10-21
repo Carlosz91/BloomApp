@@ -38,8 +38,9 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="home" options={{ title: 'Home', tabBarIcon: icon('home', 'home-outline') }} />
       <Tabs.Screen name="schedule" options={{ title: 'Agendar', tabBarIcon: icon('calendar', 'calendar-outline') }} />
-      <Tabs.Screen name="appointments" options={{ title: 'Citas', tabBarIcon: icon('person', 'person-outline') }} />
-      <Tabs.Screen name="profile" options={{ title: 'Perfil', tabBarIcon: icon('flower', 'flower-outline') }} />
+      {/* Citas es un registro de reservas (clipboard); Perfil es la persona. */}
+      <Tabs.Screen name="appointments" options={{ title: 'Citas', tabBarIcon: icon('clipboard', 'clipboard-outline') }} />
+      <Tabs.Screen name="profile" options={{ title: 'Perfil', tabBarIcon: icon('person', 'person-outline') }} />
     </Tabs>
   );
 }

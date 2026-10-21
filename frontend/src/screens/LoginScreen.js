@@ -163,7 +163,7 @@ export default function LoginScreen() {
       >
         {/* Header con logotipo y slogan */}
         <FadeInView style={styles.header}>
-          <Text style={styles.welcomeText}>Bienvenido</Text>
+          <Text style={styles.welcomeText}>Te damos la bienvenida</Text>
           <View style={styles.logoContainer}>
             <Ionicons name="flower" size={40} color={palette.primary} />
           </View>
@@ -173,7 +173,7 @@ export default function LoginScreen() {
         {/* Formulario de login mejorado estéticamente */}
         <FadeInView delay={120} style={styles.formCard}>
           <Text style={styles.formTitle}>Inicia sesión</Text>
-          <Text style={styles.formSubtitle}>Ingresa tus datos para continuar</Text>
+          <Text style={styles.formSubtitle}>Ingresá tus datos para continuar</Text>
 
           <View style={inputBox('email')}>
             <Ionicons name="mail-outline" size={20} color={palette.textMuted} style={styles.inputIcon} />
@@ -185,6 +185,8 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
+              textContentType="emailAddress"
+              autoComplete="email"
               onFocus={() => setFocused('email')}
               onBlur={() => setFocused(null)}
               style={styles.input}
@@ -201,6 +203,8 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               secureTextEntry={!showPassword}
+              textContentType="password"
+              autoComplete="password"
               onFocus={() => setFocused('password')}
               onBlur={() => setFocused(null)}
               style={styles.input}
@@ -245,7 +249,7 @@ export default function LoginScreen() {
 
         {/* Enlace de registro */}
         <FadeInView delay={240} style={styles.footer}>
-          <Text style={styles.dividerText}>¿Aún no tienes cuenta?</Text>
+          <Text style={styles.dividerText}>¿Todavía no tenés cuenta?</Text>
           <TouchableOpacity style={styles.signupLink} onPress={() => router.push('/signup')}>
             <Text style={styles.signupLinkText}>Crear cuenta</Text>
           </TouchableOpacity>

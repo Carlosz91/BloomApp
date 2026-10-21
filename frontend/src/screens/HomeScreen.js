@@ -254,7 +254,7 @@ export default function HomeScreen() {
                       )}
                     </View>
                     <Text style={styles.serviceNombre} numberOfLines={1}>{item.nombre}</Text>
-                    <Text style={styles.serviceTexto} numberOfLines={1}>{descripcion}</Text>
+                    <Text style={styles.serviceTexto} numberOfLines={2}>{descripcion}</Text>
                     <Text style={styles.servicePrecio}>Desde {formatColones(item.precio)}</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={paletteColors.primary} />

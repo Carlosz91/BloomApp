@@ -641,8 +641,7 @@ const makeStyles = (palette) => StyleSheet.create({
     marginTop: 5,
   },
   infoNote: {
-    // Nota informativa del mock de referencia (#eee8e3)
-    backgroundColor: '#eee8e3',
+    backgroundColor: palette.inputBg,
     borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -738,7 +737,8 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   timeButton: {
     backgroundColor: palette.card,
-    paddingVertical: spacing.sm,
+    // 14px vertical ≈ 44px de target con el texto de 12px (hig. táctil).
+    paddingVertical: 14,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.pill,
     borderWidth: 1,

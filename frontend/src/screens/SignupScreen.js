@@ -171,7 +171,7 @@ export default function SignupScreen() {
         </FadeInView>
 
         <FadeInView delay={240} style={styles.footer}>
-          <Text style={styles.footerText}>¿Ya tienes cuenta?</Text>
+          <Text style={styles.footerText}>¿Ya tenés cuenta?</Text>
           <TouchableOpacity style={styles.link} onPress={goBack}>
             <Text style={styles.linkText}>Iniciar sesión</Text>
           </TouchableOpacity>

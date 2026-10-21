@@ -14,16 +14,17 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
-import { font, softShadow, spacing } from '../theme/tokens';
+import { font, radius, softShadow, spacing } from '../theme/tokens';
 import PrimaryButton from '../components/PrimaryButton';
 
 const STEPS = [
   {
     key: 'welcome',
     icon: 'flower',
-    title: 'Bienvenido a BloomApp',
+    title: 'Bienvenidx a BloomApp',
     subtitle: 'Tu salón de belleza de confianza',
     description: 'Para cejas y tratamientos faciales',
+    bullets: ['Cejas', 'Tratamientos faciales'],
   },
   {
     key: 'care',
@@ -31,6 +32,7 @@ const STEPS = [
     title: 'Cuidado profesional',
     subtitle: 'Para tus cejas',
     description: 'Servicios especializados de diseño y mantenimiento',
+    bullets: ['Diseño de cejas', 'Skincare facial'],
   },
   {
     key: 'book',
@@ -38,6 +40,7 @@ const STEPS = [
     title: 'Agenda tu cita',
     subtitle: 'Reserva fácil y rápida',
     description: 'Selecciona fecha y hora para tu tratamiento',
+    bullets: ['Menos de un minuto', 'Sin complicaciones'],
   },
 ];
 
@@ -112,6 +115,11 @@ export default function OnboardingScreen() {
   // 'skip' (returning visit with consent already recorded and no new legal
   // version to accept).
   const [entry, setEntry] = useState('loading');
+
+  // La fila del FlatList horizontal en RN-web no estira los items al alto del
+  // list: la página necesita un alto explícito (viewport menos top bar y
+  // footer estimados) para que 'space-between' tenga espacio que repartir.
+  const pageHeight = Math.max(height - 168, 480);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,7 +277,8 @@ export default function OnboardingScreen() {
     // explicit acceptance checkbox. Replaces the intro-page layout.
     if (item.type === 'terms') {
       return (
-        <View style={[styles.page, { width }]}>
+      <View style={[styles.page, { width }]}>
+
           <Text style={[styles.eyebrow, styles.termsEyebrow]}>LEGAL</Text>
           <Text style={styles.title}>Términos y condiciones</Text>
           {/* On short windows the tagline would push the scroller below the
@@ -328,7 +337,7 @@ export default function OnboardingScreen() {
     const haloOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] });
 
     return (
-      <View style={[styles.page, { width }]}>
+      <View style={[styles.page, { width, height: pageHeight }]}>
         <Animated.View
           style={[
             styles.heroWrap,
@@ -357,6 +366,14 @@ export default function OnboardingScreen() {
           <Text style={styles.eyebrow}>{item.subtitle.toUpperCase()}</Text>
           <Text style={styles.title}>{item.title}</Text>
           <Text style={styles.description}>{item.description}</Text>
+          <View style={styles.bulletsRow}>
+            {item.bullets.map((chip) => (
+              <View key={chip} style={styles.chip}>
+                <View style={styles.chipDot} />
+                <Text style={styles.chipText}>{chip}</Text>
+              </View>
+            ))}
+          </View>
         </Animated.View>
       </View>
     );
@@ -466,8 +483,10 @@ const makeStyles = (palette) =>
     topButtonText: { fontFamily: font.semibold, fontSize: 15, color: palette.textMuted },
     hidden: { opacity: 0 },
     list: { flex: 1 },
-    page: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.lg },
-    heroWrap: { alignItems: 'center', justifyContent: 'center', marginBottom: spacing.xxl + spacing.md },
+    // Distribución vertical: hero arriba, bloque de texto abajo (antes del
+    // footer). 'space-between' aprovecha todo el alto: sin bolzones vacíos.
+    page: { flex: 1, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.xl, paddingTop: spacing.xl, paddingBottom: spacing.lg },
+    heroWrap: { alignItems: 'center', justifyContent: 'center', marginTop: spacing.sm },
     halo: { position: 'absolute', backgroundColor: palette.primary },
     heroTint: { backgroundColor: palette.primaryTint, alignItems: 'center', justifyContent: 'center' },
     heroInner: {
@@ -477,6 +496,23 @@ const makeStyles = (palette) =>
       ...softShadow(palette),
     },
     textBlock: { alignItems: 'center', maxWidth: 340 },
+    bulletsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      marginTop: spacing.lg,
+    },
+    chip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: palette.primaryTint,
+      borderRadius: radius.pill,
+      paddingVertical: 6,
+      paddingHorizontal: spacing.md,
+    },
+    chipDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: palette.primary, marginRight: 6 },
+    chipText: { color: palette.primary, fontFamily: font.semibold, fontSize: 12 },
     eyebrow: {
       fontFamily: font.semibold,
       fontSize: 12,

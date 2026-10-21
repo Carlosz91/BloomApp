@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
@@ -11,7 +12,12 @@ import PrimaryButton from '../components/PrimaryButton';
 import { showSuccessToast, showErrorToast } from '../services/Notifications';
 import { API_BASE_URL } from '../config/api';
 
-// Preferencias locales del mock de referencia (solo vista; no persisten aún)
+const PREFERENCIAS_STORAGE_KEY = 'bloomapp_preferencias';
+
+// Contacto directo del estudio (WhatsApp de reservas y consultas).
+const WHATSAPP_URL = 'https://wa.me/595982143176?text=Hola%20BloomApp%2C%20tengo%20una%20consulta';
+// Preferencias de novedades: se persisten localmente (AsyncStorage) para que
+// el estado sobreviva a la sesión; son una preferencia de app, no un dato de cuenta.
 const PREFERENCIAS_FILAS = [
   { key: 'cejas', titulo: 'Promociones de cejas', texto: 'Descuentos, combos y lanzamientos.' },
   { key: 'rostro', titulo: 'Cuidados para el rostro', texto: 'Tips, novedades y rituales faciales.' },
@@ -35,6 +41,28 @@ export default function ProfileScreen() {
   const [editing, setEditing] = useState(false);
   const [errors, setErrors] = useState({});
   const [preferencias, setPreferencias] = useState({ cejas: true, rostro: true, estudio: false });
+
+  // Cargar preferencias guardadas en el arranque de la pantalla.
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(PREFERENCIAS_STORAGE_KEY)
+      .then((stored) => {
+        if (active && stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (parsed && typeof parsed === 'object') {
+              setPreferencias((prev) => ({ ...prev, ...parsed }));
+            }
+          } catch {
+            // JSON corrupto: se mantienen los valores por defecto.
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Refrescar datos del usuario autenticado desde la API
   useEffect(() => {
@@ -107,6 +135,10 @@ export default function ProfileScreen() {
           telefono: data.user.telefono || '',
           email: data.user.email || profile.email,
           genero: data.user.genero ?? profile.genero,
+          // El backend no modifica creado_en desde /auth/profile: preservamos
+          // el valor ya cargado para que "Parte de Bloom desde…" no parpadee
+          // al fallback estático después de guardar.
+          creado_en: data.user.creado_en ?? profile.creado_en,
         });
         await updateUser({
           nombre: data.user.nombre,
@@ -139,17 +171,27 @@ export default function ProfileScreen() {
     setEditing(false);
   };
 
-  // Confirmación de preferencias (feedback local, como el toast del mock)
-  const guardarPreferencias = () => {
-    showSuccessToast({
-      title: 'Preferencias guardadas',
-      description: 'Tus preferencias se guardaron',
-    });
+  // Preferencias se guardan en AsyncStorage: el toast solo se muestra si la
+  // escritura real tuvo éxito.
+  const guardarPreferencias = async () => {
+    try {
+      await AsyncStorage.setItem(PREFERENCIAS_STORAGE_KEY, JSON.stringify(preferencias));
+      showSuccessToast({
+        title: 'Preferencias guardadas',
+        description: 'Tus preferencias se guardaron',
+      });
+    } catch (error) {
+      console.error('Error saving preferences:', error);
+      showErrorToast({
+        title: 'Error al guardar',
+        description: 'No se pudieron guardar tus preferencias',
+      });
+    }
   };
 
   const abrirWhatsApp = () => {
-    // Abre WhatsApp (app o web) sin depender de un número guardado en la app
-    Linking.openURL('https://wa.me/').catch(() => {});
+    // Abre WhatsApp (app o web) con el número del estudio y mensaje ya armado.
+    Linking.openURL(WHATSAPP_URL).catch(() => {});
   };
 
   const initial = (profile.nombre || '?').trim().charAt(0).toUpperCase();
@@ -210,6 +252,7 @@ export default function ProfileScreen() {
           <PrimaryButton
             label="Editar perfil"
             icon="create-outline"
+            variant="secondary"
             onPress={() => setEditing(true)}
             style={styles.editButton}
           />
@@ -217,12 +260,11 @@ export default function ProfileScreen() {
           {/* Preferencias de novedades */}
           <View style={styles.preferenciasCard}>
             <View style={styles.preferenciasHead}>
-              <View style={styles.preferenciasHeadInfo}>
-                <Text style={styles.preferenciasTitulo}>Tus preferencias</Text>
-                <Text style={styles.preferenciasSub}>Elegí qué novedades querés recibir.</Text>
-              </View>
-              <Ionicons name="pencil" size={18} color={paletteColors.primary} />
+            <View style={styles.preferenciasHeadInfo}>
+              <Text style={styles.preferenciasTitulo}>Tus preferencias</Text>
+              <Text style={styles.preferenciasSub}>Elegí qué novedades querés recibir.</Text>
             </View>
+          </View>
             {PREFERENCIAS_FILAS.map((row, i) => {
               const esUltima = i === PREFERENCIAS_FILAS.length - 1;
               return (
@@ -279,7 +321,10 @@ const ProfileRow = ({ styles, palette, icon, label, value, last }) => (
     </View>
     <View style={styles.rowText}>
       <Text style={styles.profileLabel}>{label}</Text>
-      <Text style={styles.profileValue}>{value}</Text>
+      {/* Dato vacío: se declara explícitamente en vez de dejar la fila muda. */}
+      <Text style={[styles.profileValue, !value && styles.profileValueEmpty]}>
+        {value || 'Sin agregar'}
+      </Text>
     </View>
   </View>
 );
@@ -344,6 +389,15 @@ const EditProfileForm = ({ styles, palette, profile, setProfile, onSave, onCance
             Mujer
           </Text>
         </TouchableOpacity>
+        {/* Sin respuesta: neutralidad expresada como opción, no como vacío. */}
+        <TouchableOpacity
+          style={[styles.genderChip, profile.genero === '' && styles.genderChipActive]}
+          onPress={() => setProfile({ ...profile, genero: '' })}
+        >
+          <Text style={[styles.genderChipText, profile.genero === '' && styles.genderChipTextActive]}>
+            Prefiero no decirlo
+          </Text>
+        </TouchableOpacity>
       </View>
     </View>
 
@@ -368,10 +422,13 @@ const makeStyles = (paletteColors) => StyleSheet.create({
   },
   genderRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
+  // 46%: dos por fila; el tercero crece a ancho completo en la segunda línea.
   genderChip: {
     flex: 1,
+    flexBasis: '46%',
     alignItems: 'center',
     justifyContent: 'center',
     height: 44,
@@ -391,6 +448,11 @@ const makeStyles = (paletteColors) => StyleSheet.create({
   genderChipTextActive: {
     color: paletteColors.primary,
     fontFamily: font.semibold,
+  },
+  // Dato de cuenta sin completar: mismo tamaño, intencionalmente apagado.
+  profileValueEmpty: {
+    color: paletteColors.textMuted,
+    fontStyle: 'italic',
   },
   sectionWrap: {
     paddingHorizontal: spacing.lg,
