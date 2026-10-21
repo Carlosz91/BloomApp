@@ -10,10 +10,11 @@ import FadeInView from '../components/FadeInView';
 import PrimaryButton from '../components/PrimaryButton';
 import { showSuccessToast, showErrorToast } from '../services/Notifications';
 import { API_BASE_URL } from '../config/api';
-import { formatGuaranies } from '../utils/format';
+import { formatColones } from '../utils/format';
 
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const WEEK_HEADERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const CATEGORY_TABS = ['Todos', 'Cejas', 'Rostro'];
 
 // Horarios de atención 9:00 - 16:00, etiquetados como meridiam correctos.
 const buildTimeSlots = () => {
@@ -55,25 +56,22 @@ export default function ScheduleScreen() {
   const [pickedServiceId, setPickedServiceId] = useState(null);
   const [catalog, setCatalog] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogFilter, setCatalogFilter] = useState('Todos');
   const [loadFailed, setLoadFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   // El servicio puede venir por params (clic desde Home) o elegirse acá (pestaña Agenda)
   const activeServiceId = params.serviceId ? String(params.serviceId) : pickedServiceId;
 
+  // Catálogo filtrado por la pestaña activa del selector
+  const catalogVisible = useMemo(() => {
+    if (catalogFilter === 'Todos') return catalog;
+    return catalog.filter((s) => s.categoria === (catalogFilter === 'Rostro' ? 'rostro' : 'cejas'));
+  }, [catalog, catalogFilter]);
+
   // Cargar servicio seleccionado desde el catálogo real
   useEffect(() => {
-    if (!activeServiceId) {
-      setIsLoading(false);
-      setService(null);
-      setLoadFailed(false);
-      return;
-    }
-
     let cancelled = false;
-    setIsLoading(true);
-    setLoadFailed(false);
-    setService(null);
 
     const fetchService = async () => {
       try {
@@ -91,8 +89,23 @@ export default function ScheduleScreen() {
       }
     };
 
-    fetchService();
-    setAvailableTimes(buildTimeSlots());
+    // Transiciones de carga dentro de una función interna: evita setState
+    // síncrono en el cuerpo del effect y respeta la bandera cancelled.
+    const loadService = () => {
+      if (!activeServiceId) {
+        setIsLoading(false);
+        setService(null);
+        setLoadFailed(false);
+        return;
+      }
+      setIsLoading(true);
+      setLoadFailed(false);
+      setService(null);
+      fetchService();
+      setAvailableTimes(buildTimeSlots());
+    };
+
+    loadService();
 
     return () => {
       cancelled = true;
@@ -104,10 +117,10 @@ export default function ScheduleScreen() {
     if (activeServiceId || !token) return;
 
     let cancelled = false;
-    setCatalogLoading(true);
-    setCatalog([]);
 
     const fetchCatalog = async () => {
+      setCatalogLoading(true);
+      setCatalog([]);
       try {
         const res = await fetch(`${API_BASE_URL}/services`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -265,53 +278,19 @@ const bookAppointment = async () => {
     return (
       <ScrollView
         style={styles.container}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.lg, paddingBottom: spacing.xxl }]}
         showsVerticalScrollIndicator={false}
       >
+        <Text style={styles.eyebrow}>NUESTROS RITUALES</Text>
         <Text style={styles.screenTitle}>Agendar cita</Text>
         <Text style={styles.pickerSubTitle}>Elige el servicio que quieras reservar</Text>
         {catalogLoading ? (
           <View style={styles.centeredLoading}>
             <ActivityIndicator size="large" color={palette.primary} />
           </View>
-        ) : (
-          ['cejas', 'rostro'].map((cat) => {
-            const items = catalog.filter(s => s.categoria === cat);
-            if (items.length === 0) return null;
-            return (
-              <View key={cat} style={styles.pickSection}>
-                <Text style={styles.pickSectionTitle}>{cat === 'cejas' ? 'Cejas' : 'Rostro'}</Text>
-                {items.map((item, index) => (
-                  <FadeInView key={item.id} delay={Math.min(index, 8) * 70}>
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      style={styles.pickCard}
-                      onPress={() => setPickedServiceId(item.id)}
-                    >
-                      <View style={styles.pickIcon}>
-                        <Ionicons
-                          name={item.categoria === 'rostro' ? 'sparkles-outline' : 'flower-outline'}
-                          size={22}
-                          color={palette.primary}
-                        />
-                      </View>
-                      <View style={styles.pickInfo}>
-                        <Text style={styles.pickName}>{item.nombre}</Text>
-                        <Text style={styles.pickDetails}>
-                          {formatGuaranies(item.precio)} - {item.duracion_minutos} min
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={20} color={palette.textMuted} />
-                    </TouchableOpacity>
-                  </FadeInView>
-                ))}
-              </View>
-            );
-          })
-        )}
-        {!catalogLoading && catalog.length === 0 && (
+        ) : catalog.length === 0 ? (
           <View style={styles.pickEmpty}>
-            <Ionicons name="flower-outline" size={40} color={palette.border} />
+            <Ionicons name="flower-outline" size={40} color={palette.plumSoft} />
             <Text style={styles.pickEmptyText}>No hay servicios disponibles</Text>
             <PrimaryButton
               label="Reintentar"
@@ -320,6 +299,57 @@ const bookAppointment = async () => {
               style={styles.pickEmptyButton}
             />
           </View>
+        ) : (
+          <>
+            <View style={styles.filterTabs}>
+              {CATEGORY_TABS.map((tab) => {
+                const active = catalogFilter === tab;
+                return (
+                  <TouchableOpacity
+                    key={tab}
+                    style={[styles.filterTab, active && styles.filterTabActive]}
+                    onPress={() => setCatalogFilter(tab)}
+                  >
+                    <Text style={[styles.filterTabText, active && styles.filterTabTextActive]}>{tab}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.serviceList}>
+              {catalogVisible.map((item, index) => (
+                <FadeInView key={item.id} delay={Math.min(index, 8) * 70}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    style={styles.serviceRow}
+                    onPress={() => setPickedServiceId(item.id)}
+                  >
+                    <View style={styles.serviceIcon}>
+                      <Ionicons
+                        name={item.categoria === 'rostro' ? 'sparkles-outline' : 'flower-outline'}
+                        size={20}
+                        color={palette.primary}
+                      />
+                    </View>
+                    <View style={styles.serviceBody}>
+                      <Text style={styles.serviceCategoria}>
+                        {item.categoria === 'rostro' ? 'Rostro' : 'Cejas'}
+                      </Text>
+                      <Text style={styles.serviceNombre} numberOfLines={1}>{item.nombre}</Text>
+                      <Text style={styles.serviceTexto}>{item.duracion_minutos} min</Text>
+                      <Text style={styles.servicePrecio}>Desde {formatColones(item.precio)}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={palette.primary} />
+                  </TouchableOpacity>
+                </FadeInView>
+              ))}
+            </View>
+            <View style={styles.infoNote}>
+              <Ionicons name="information-circle-outline" size={16} color={palette.textMuted} />
+              <Text style={styles.infoNoteText}>
+                Los valores publicados son referenciales y pueden variar según la evaluación personalizada de cada servicio.
+              </Text>
+            </View>
+          </>
         )}
       </ScrollView>
     );
@@ -353,7 +383,7 @@ const bookAppointment = async () => {
       style={styles.container}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: insets.top + spacing.xl, paddingBottom: spacing.xxl },
+        { paddingTop: insets.top + spacing.lg, paddingBottom: spacing.xxl },
       ]}
       showsVerticalScrollIndicator={false}
     >
@@ -366,11 +396,17 @@ const bookAppointment = async () => {
       {/* Resumen del servicio */}
       <FadeInView style={styles.serviceSummary}>
         <View style={styles.summaryIcon}>
-          <Ionicons name="flower-outline" size={24} color={palette.onPrimary} />
+          <Ionicons
+            name={service.categoria === 'rostro' ? 'sparkles-outline' : 'flower-outline'}
+            size={22}
+            color={palette.primary}
+          />
         </View>
         <View style={styles.summaryInfo}>
           <Text style={styles.serviceName}>{service.nombre}</Text>
-          <Text style={styles.servicePrice}>{formatGuaranies(service.precio)} - {service.duracion_minutos} min</Text>
+          <Text style={styles.serviceResume}>
+            Desde {formatColones(service.precio)} · {service.duracion_minutos} min
+          </Text>
         </View>
       </FadeInView>
 
@@ -482,26 +518,34 @@ const makeStyles = (palette) => StyleSheet.create({
     backgroundColor: palette.background,
   },
   content: {
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
   },
   centered: {
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.xl,
   },
-  screenTitle: {
-    color: palette.textPrimary,
+  eyebrow: {
+    color: palette.eyebrow,
     fontFamily: font.semibold,
-    fontSize: 28,
-    lineHeight: 34,
-    marginBottom: spacing.lg,
+    fontSize: 10,
+    letterSpacing: 1.7,
+    marginBottom: spacing.xs,
+  },
+  screenTitle: {
+    color: palette.heading,
+    fontFamily: font.semibold,
+    fontSize: 27,
+    lineHeight: 32,
+    letterSpacing: -0.9,
+    marginBottom: spacing.xs,
   },
   backRow: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: palette.primaryTint,
+    backgroundColor: palette.plumSoft,
     borderRadius: radius.pill,
     paddingVertical: 6,
     paddingHorizontal: spacing.md,
@@ -515,48 +559,104 @@ const makeStyles = (palette) => StyleSheet.create({
   pickerSubTitle: {
     color: palette.textMuted,
     fontFamily: font.regular,
-    fontSize: 15,
-    marginTop: -spacing.md,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: spacing.xs,
     marginBottom: spacing.lg,
   },
-  pickCard: {
+  filterTabs: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginBottom: spacing.lg,
+  },
+  filterTab: {
+    minWidth: 72,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: palette.line,
+    backgroundColor: palette.card,
+    alignItems: 'center',
+  },
+  filterTabActive: {
+    backgroundColor: palette.primary,
+    borderColor: palette.primary,
+  },
+  filterTabText: {
+    color: palette.textMuted,
+    fontFamily: font.medium,
+    fontSize: 11,
+  },
+  filterTabTextActive: {
+    color: palette.onPrimary,
+    fontFamily: font.semibold,
+  },
+  // Filas de servicio (mismo lenguaje visual que Home)
+  serviceList: {
+    gap: 10,
+  },
+  serviceRow: {
     ...cardStyle(palette),
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md,
-    padding: spacing.lg,
+    gap: 12,
+    padding: 14,
   },
-  pickSection: {
-    marginBottom: spacing.lg,
-  },
-  pickSectionTitle: {
-    color: palette.primary,
-    fontFamily: font.semibold,
-    fontSize: 13,
-    marginBottom: spacing.sm,
-  },
-  pickIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: palette.primaryTint,
+  serviceIcon: {
+    width: 45,
+    height: 45,
+    borderRadius: 23,
+    backgroundColor: palette.plumSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing.md,
   },
-  pickInfo: {
+  serviceBody: {
     flex: 1,
+    minWidth: 0,
   },
-  pickName: {
+  serviceCategoria: {
+    color: palette.eyebrow,
+    fontFamily: font.semibold,
+    fontSize: 9,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
+  serviceNombre: {
     color: palette.textPrimary,
     fontFamily: font.semibold,
-    fontSize: 16,
+    fontSize: 14,
+    marginTop: 3,
   },
-  pickDetails: {
+  serviceTexto: {
     color: palette.textMuted,
     fontFamily: font.regular,
-    fontSize: 13,
+    fontSize: 11,
     marginTop: 2,
+  },
+  servicePrecio: {
+    color: palette.primary,
+    fontFamily: font.semibold,
+    fontSize: 11,
+    marginTop: 5,
+  },
+  infoNote: {
+    // Nota informativa del mock de referencia (#eee8e3)
+    backgroundColor: '#eee8e3',
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 9,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginTop: spacing.lg,
+  },
+  infoNoteText: {
+    flex: 1,
+    color: palette.textMuted,
+    fontFamily: font.regular,
+    fontSize: 11,
+    lineHeight: 16,
   },
   centeredLoading: {
     paddingVertical: spacing.xxl,
@@ -578,42 +678,40 @@ const makeStyles = (palette) => StyleSheet.create({
     minWidth: 180,
   },
   serviceSummary: {
-    backgroundColor: palette.primary,
-    padding: spacing.lg,
-    borderRadius: radius.lg,
-    marginBottom: spacing.xl,
+    ...cardStyle(palette),
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.xl,
   },
   summaryIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    width: 45,
+    height: 45,
+    borderRadius: 23,
+    backgroundColor: palette.plumSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,
   },
   summaryInfo: { flex: 1 },
   serviceName: {
-    color: palette.onPrimary,
+    color: palette.textPrimary,
     fontFamily: font.semibold,
-    fontSize: 18,
+    fontSize: 15,
   },
-  servicePrice: {
-    color: palette.onPrimary,
-    opacity: 0.85,
-    fontFamily: font.regular,
-    fontSize: 14,
+  serviceResume: {
+    color: palette.primary,
+    fontFamily: font.semibold,
+    fontSize: 12,
     marginTop: 2,
   },
   section: {
     marginBottom: spacing.lg,
   },
   sectionTitle: {
-    color: palette.textPrimary,
+    color: palette.heading,
     fontFamily: font.semibold,
-    fontSize: 15,
+    fontSize: 14,
     marginBottom: spacing.sm,
   },
   dateInput: {
@@ -627,7 +725,7 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   dateText: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: font.regular,
     color: palette.textPrimary,
   },
@@ -644,7 +742,7 @@ const makeStyles = (palette) => StyleSheet.create({
     paddingHorizontal: spacing.lg,
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: palette.border,
+    borderColor: palette.line,
     marginRight: spacing.sm,
     marginBottom: spacing.sm,
   },
@@ -655,7 +753,7 @@ const makeStyles = (palette) => StyleSheet.create({
   timeButtonText: {
     color: palette.primary,
     fontFamily: font.semibold,
-    fontSize: 13,
+    fontSize: 12,
   },
   timeButtonTextActive: {
     color: palette.onPrimary,
@@ -679,9 +777,9 @@ const makeStyles = (palette) => StyleSheet.create({
     opacity: 0.35,
   },
   calTitle: {
-    color: palette.textPrimary,
+    color: palette.heading,
     fontFamily: font.semibold,
-    fontSize: 14,
+    fontSize: 13,
   },
   calWeek: {
     flexDirection: 'row',
@@ -711,7 +809,7 @@ const makeStyles = (palette) => StyleSheet.create({
     backgroundColor: palette.primary,
   },
   calDayText: {
-    color: palette.border,
+    color: palette.textMuted,
     fontSize: 13,
     fontFamily: font.regular,
   },
@@ -735,7 +833,7 @@ const makeStyles = (palette) => StyleSheet.create({
     marginBottom: spacing.lg,
   },
   errorText: {
-    color: palette.textPrimary,
+    color: palette.heading,
     fontFamily: font.semibold,
     fontSize: 18,
     textAlign: 'center',

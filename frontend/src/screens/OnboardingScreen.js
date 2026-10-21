@@ -135,7 +135,7 @@ export default function OnboardingScreen() {
     const textOpacity = scrollX.interpolate({ inputRange: range, outputRange: [0, 1, 0], extrapolate: 'clamp' });
     const textShift = scrollX.interpolate({ inputRange: range, outputRange: [width * 0.12, 0, -width * 0.12], extrapolate: 'clamp' });
     const floatY = float.interpolate({ inputRange: [0, 1], outputRange: [-6, 6] });
-    const haloScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] });
+    const haloScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.16] });
     const haloOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] });
 
     return (
@@ -178,7 +178,7 @@ export default function OnboardingScreen() {
       style={[
         styles.container,
         {
-          paddingTop: insets.top + spacing.sm,
+          paddingTop: insets.top,
           paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.sm,
           opacity: entrance,
           transform: [{ translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
@@ -269,7 +269,7 @@ const makeStyles = (palette) =>
     topButtonText: { fontFamily: font.semibold, fontSize: 15, color: palette.textMuted },
     hidden: { opacity: 0 },
     list: { flex: 1 },
-    page: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
+    page: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.lg },
     heroWrap: { alignItems: 'center', justifyContent: 'center', marginBottom: spacing.xxl + spacing.md },
     halo: { position: 'absolute', backgroundColor: palette.primary },
     heroTint: { backgroundColor: palette.primaryTint, alignItems: 'center', justifyContent: 'center' },

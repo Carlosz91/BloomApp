@@ -1,14 +1,22 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
-import { cardStyle, font, radius, softShadow, spacing } from '../theme/tokens';
+import { cardStyle, softShadow, font, radius, spacing } from '../theme/tokens';
 import FadeInView from '../components/FadeInView';
 import PrimaryButton from '../components/PrimaryButton';
 import { showSuccessToast, showErrorToast } from '../services/Notifications';
 import { API_BASE_URL } from '../config/api';
+
+// Preferencias locales del mock de referencia (solo vista; no persisten aún)
+const PREFERENCIAS_FILAS = [
+  { key: 'cejas', titulo: 'Promociones de cejas', texto: 'Descuentos, combos y lanzamientos.' },
+  { key: 'rostro', titulo: 'Cuidados para el rostro', texto: 'Tips, novedades y rituales faciales.' },
+  { key: 'estudio', titulo: 'Novedades del estudio', texto: 'Noticias y experiencias especiales.' },
+];
 
 export default function ProfileScreen() {
   const { logout, user, updateUser, token } = useAuth();
@@ -20,10 +28,12 @@ export default function ProfileScreen() {
     nombre: user?.nombre || '',
     telefono: user?.telefono || '',
     email: user?.email || '',
+    genero: user?.genero || '',
   });
   const [isSaving, setIsSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [errors, setErrors] = useState({});
+  const [preferencias, setPreferencias] = useState({ cejas: true, rostro: true, estudio: false });
 
   // Refrescar datos del usuario autenticado desde la API
   useEffect(() => {
@@ -41,6 +51,7 @@ export default function ProfileScreen() {
               nombre: data.user.nombre || '',
               telefono: data.user.telefono || '',
               email: data.user.email || '',
+              genero: data.user.genero || '',
             });
           }
         }
@@ -83,7 +94,7 @@ export default function ProfileScreen() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ nombre: profile.nombre, telefono: profile.telefono }),
+        body: JSON.stringify({ nombre: profile.nombre, telefono: profile.telefono, genero: profile.genero }),
       });
 
       const data = await res.json().catch(() => null);
@@ -93,10 +104,12 @@ export default function ProfileScreen() {
           nombre: data.user.nombre || profile.nombre,
           telefono: data.user.telefono || '',
           email: data.user.email || profile.email,
+          genero: data.user.genero ?? profile.genero,
         });
         await updateUser({
           nombre: data.user.nombre,
           telefono: data.user.telefono,
+          genero: data.user.genero,
         });
         showSuccessToast({
           title: 'Perfil actualizado',
@@ -124,7 +137,22 @@ export default function ProfileScreen() {
     setEditing(false);
   };
 
+  // Confirmación de preferencias (feedback local, como el toast del mock)
+  const guardarPreferencias = () => {
+    showSuccessToast({
+      title: 'Preferencias guardadas',
+      description: 'Tus preferencias se guardaron',
+    });
+  };
+
+  const abrirWhatsApp = () => {
+    // Abre WhatsApp (app o web) sin depender de un número guardado en la app
+    Linking.openURL('https://wa.me/').catch(() => {});
+  };
+
   const initial = (profile.nombre || '?').trim().charAt(0).toUpperCase();
+  const primerNombre = (profile.nombre || '').trim().split(/\s+/)[0] || '';
+  const tituloSaludo = primerNombre ? `Hola, ${primerNombre}` : 'Hola';
 
   return (
     <ScrollView
@@ -133,12 +161,27 @@ export default function ProfileScreen() {
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <HeaderProfile
-        styles={styles}
-        topInset={insets.top}
-        initial={initial}
-        profile={profile}
-      />
+      <View style={[styles.pageHeading, { paddingTop: insets.top + spacing.lg }]}>
+        <Text style={styles.pageEyebrow}>MI ESPACIO</Text>
+        <Text style={styles.pageTitle}>{tituloSaludo}</Text>
+        <Text style={styles.pageSubTitle}>Personalizá tus intereses para recibir novedades que realmente te gusten.</Text>
+      </View>
+
+      {/* Tarjeta de perfil centrada */}
+      <FadeInView delay={60} style={styles.sectionWrap}>
+        <View style={styles.profileCard}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initial}</Text>
+          </View>
+          <Text style={styles.profileNombre}>{profile.nombre}</Text>
+          <Text style={styles.profileEmail}>{profile.email}</Text>
+          <View style={styles.profileSince}>
+            <Ionicons name="heart" size={12} color={paletteColors.rose} />
+            <Text style={styles.profileSinceTexto}>Parte de Bloom desde 2023</Text>
+          </View>
+        </View>
+      </FadeInView>
+
       {editing ? (
         <FadeInView>
           <EditProfileForm
@@ -152,7 +195,7 @@ export default function ProfileScreen() {
           />
         </FadeInView>) : (
         <FadeInView delay={100} style={styles.profileView}>
-          <View style={styles.profileCard}>
+          <View style={styles.datosCard}>
             <ProfileRow styles={styles} palette={paletteColors} icon="person-outline" label="Nombre" value={profile.nombre} />
             <ProfileRow styles={styles} palette={paletteColors} icon="call-outline" label="Teléfono" value={profile.telefono} />
             <ProfileRow styles={styles} palette={paletteColors} icon="mail-outline" label="Correo electrónico" value={profile.email} last />
@@ -163,6 +206,52 @@ export default function ProfileScreen() {
             onPress={() => setEditing(true)}
             style={styles.editButton}
           />
+
+          {/* Preferencias de novedades */}
+          <View style={styles.preferenciasCard}>
+            <View style={styles.preferenciasHead}>
+              <View style={styles.preferenciasHeadInfo}>
+                <Text style={styles.preferenciasTitulo}>Tus preferencias</Text>
+                <Text style={styles.preferenciasSub}>Elegí qué novedades querés recibir.</Text>
+              </View>
+              <Ionicons name="pencil" size={18} color={paletteColors.primary} />
+            </View>
+            {PREFERENCIAS_FILAS.map((row, i) => {
+              const esUltima = i === PREFERENCIAS_FILAS.length - 1;
+              return (
+                <View key={row.key} style={[styles.prefRow, !esUltima && styles.prefRowSeparador]}>
+                  <View style={styles.prefInfo}>
+                    <Text style={styles.prefTitulo}>{row.titulo}</Text>
+                    <Text style={styles.prefTexto}>{row.texto}</Text>
+                  </View>
+                  <Switch
+                    value={preferencias[row.key]}
+                    onValueChange={(valor) => setPreferencias((prev) => ({ ...prev, [row.key]: valor }))}
+                    trackColor={{ false: '#d6d0cd', true: paletteColors.sage }}
+                    thumbColor="#fffdfb"
+                  />
+                </View>
+              );
+            })}
+            <TouchableOpacity style={styles.guardarButton} onPress={guardarPreferencias}>
+              <Text style={styles.guardarButtonText}>Guardar preferencias</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Consulta por WhatsApp */}
+          <View style={styles.contactCard}>
+            <View style={styles.contactIcono}>
+              <Ionicons name="logo-whatsapp" size={20} color={paletteColors.sage} />
+            </View>
+            <View style={styles.contactInfo}>
+              <Text style={styles.contactTitulo}>¿Tenés una consulta?</Text>
+              <Text style={styles.contactTexto}>Escribinos por WhatsApp y te ayudamos.</Text>
+            </View>
+            <TouchableOpacity style={styles.contactButton} onPress={abrirWhatsApp}>
+              <Text style={styles.contactButtonText}>Contactar</Text>
+            </TouchableOpacity>
+          </View>
+
           <PrimaryButton
             label="Cerrar sesión"
             icon="log-out-outline"
@@ -179,23 +268,13 @@ export default function ProfileScreen() {
 const ProfileRow = ({ styles, palette, icon, label, value, last }) => (
   <View style={[styles.profileFieldRow, last && styles.profileFieldRowLast]}>
     <View style={styles.rowIcon}>
-      <Ionicons name={icon} size={18} color={palette.primary} />
+      <Ionicons name={icon} size={16} color={palette.primary} />
     </View>
     <View style={styles.rowText}>
       <Text style={styles.profileLabel}>{label}</Text>
       <Text style={styles.profileValue}>{value}</Text>
     </View>
   </View>
-);
-
-const HeaderProfile = ({ styles, topInset, initial, profile }) => (
-  <FadeInView style={[styles.header, { paddingTop: topInset + spacing.lg }]}>
-    <View style={styles.avatar}>
-      <Text style={styles.avatarText}>{initial}</Text>
-    </View>
-    <Text style={styles.headerTitle}>{profile.nombre}</Text>
-    <Text style={styles.headerSubTitle}>{profile.email}</Text>
-  </FadeInView>
 );
 
 const EditProfileForm = ({ styles, palette, profile, setProfile, onSave, onCancel, errors }) => (
@@ -234,9 +313,31 @@ const EditProfileForm = ({ styles, palette, profile, setProfile, onSave, onCance
         placeholderTextColor={palette.textMuted}
         value={profile.email}
         onChangeText={n => setProfile({ ...profile, email: n })}
-        placeholder="camila@luminabeauty.com"
+        placeholder="camila@bloomapp.com"
         editable={false}
       />
+    </View>
+
+    <View style={styles.fieldRow}>
+      <Text style={styles.label}>¿Cómo te saludamos?</Text>
+      <View style={styles.genderRow}>
+        <TouchableOpacity
+          style={[styles.genderChip, profile.genero === 'hombre' && styles.genderChipActive]}
+          onPress={() => setProfile({ ...profile, genero: 'hombre' })}
+        >
+          <Text style={[styles.genderChipText, profile.genero === 'hombre' && styles.genderChipTextActive]}>
+            Hombre
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.genderChip, profile.genero === 'mujer' && styles.genderChipActive]}
+          onPress={() => setProfile({ ...profile, genero: 'mujer' })}
+        >
+          <Text style={[styles.genderChipText, profile.genero === 'mujer' && styles.genderChipTextActive]}>
+            Mujer
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
 
     <View style={styles.actions}>
@@ -258,45 +359,115 @@ const makeStyles = (paletteColors) => StyleSheet.create({
   content: {
     paddingBottom: spacing.xxl,
   },
-  header: {
-    alignItems: 'center',
-    paddingBottom: spacing.xxl,
-    backgroundColor: paletteColors.primary,
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
+  genderRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
-  avatar: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    backgroundColor: paletteColors.card,
+  genderChip: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: spacing.xl,
-    marginBottom: spacing.md,
+    height: 44,
+    borderWidth: 1.5,
+    borderColor: paletteColors.line,
+    borderRadius: radius.sm,
+    backgroundColor: paletteColors.inputBg,
+  },
+  genderChipActive: {
+    borderColor: paletteColors.primary,
+  },
+  genderChipText: {
+    color: paletteColors.textMuted,
+    fontFamily: font.regular,
+    fontSize: 15,
+  },
+  genderChipTextActive: {
+    color: paletteColors.primary,
+    fontFamily: font.semibold,
+  },
+  sectionWrap: {
+    paddingHorizontal: spacing.lg,
+  },
+  pageHeading: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  pageEyebrow: {
+    color: paletteColors.eyebrow,
+    fontSize: 10,
+    fontFamily: font.semibold,
+    letterSpacing: 1.7,
+    marginBottom: spacing.xs,
+  },
+  pageTitle: {
+    color: paletteColors.heading,
+    fontSize: 27,
+    lineHeight: 32,
+    fontFamily: font.semibold,
+    letterSpacing: -0.9,
+    marginTop: 2,
+  },
+  pageSubTitle: {
+    color: paletteColors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: font.regular,
+    marginTop: spacing.xs,
+  },
+  // Tarjeta de perfil
+  profileCard: {
+    ...cardStyle(paletteColors),
+    alignItems: 'center',
+    padding: 22,
+  },
+  avatar: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: paletteColors.plumSoft,
+    borderWidth: 4,
+    // Marco clarito del avatar, tomado del mock
+    borderColor: '#faf5f7',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...softShadow(paletteColors),
   },
   avatarText: {
     color: paletteColors.primary,
-    fontSize: 34,
-    fontFamily: font.semibold,
-  },
-  headerTitle: {
-    color: paletteColors.onPrimary,
     fontSize: 22,
     fontFamily: font.semibold,
   },
-  headerSubTitle: {
-    color: paletteColors.onPrimary,
-    opacity: 0.8,
-    fontSize: 14,
+  profileNombre: {
+    color: paletteColors.heading,
+    fontSize: 18,
+    fontFamily: font.semibold,
+    marginTop: 12,
+  },
+  profileEmail: {
+    color: paletteColors.textMuted,
+    fontSize: 12,
     fontFamily: font.regular,
     marginTop: 2,
   },
-  profileView: {
-    padding: spacing.xl,
+  profileSince: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: paletteColors.line,
   },
-  profileCard: {
+  profileSinceTexto: {
+    color: paletteColors.rose,
+    fontSize: 11,
+    fontFamily: font.semibold,
+  },
+  profileView: {
+    paddingHorizontal: spacing.lg,
+  },
+  // Filas de datos del perfil
+  datosCard: {
     ...cardStyle(paletteColors),
     paddingVertical: spacing.sm,
   },
@@ -305,7 +476,7 @@ const makeStyles = (paletteColors) => StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: paletteColors.border,
+    borderBottomColor: paletteColors.line,
   },
   profileFieldRowLast: {
     borderBottomWidth: 0,
@@ -314,7 +485,7 @@ const makeStyles = (paletteColors) => StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: paletteColors.primaryTint,
+    backgroundColor: paletteColors.plumSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,
@@ -324,24 +495,143 @@ const makeStyles = (paletteColors) => StyleSheet.create({
   },
   profileLabel: {
     color: paletteColors.textMuted,
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: font.regular,
   },
   profileValue: {
     color: paletteColors.textPrimary,
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: font.semibold,
     marginTop: 2,
   },
   editButton: {
     marginTop: spacing.xl,
   },
+  // Preferencias
+  preferenciasCard: {
+    ...cardStyle(paletteColors),
+    marginTop: spacing.lg,
+    padding: 22,
+  },
+  preferenciasHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: paletteColors.line,
+  },
+  preferenciasHeadInfo: {
+    flex: 1,
+  },
+  preferenciasTitulo: {
+    color: paletteColors.heading,
+    fontSize: 16,
+    fontFamily: font.semibold,
+  },
+  preferenciasSub: {
+    color: paletteColors.textMuted,
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: font.regular,
+    marginTop: 4,
+  },
+  prefRow: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  prefRowSeparador: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: paletteColors.line,
+  },
+  prefInfo: {
+    flex: 1,
+  },
+  prefTitulo: {
+    color: paletteColors.textPrimary,
+    fontSize: 13,
+    fontFamily: font.semibold,
+  },
+  prefTexto: {
+    color: paletteColors.textMuted,
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: font.regular,
+    marginTop: 4,
+  },
+  guardarButton: {
+    alignSelf: 'flex-end',
+    marginTop: 16,
+    minHeight: 39,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: radius.sm,
+    backgroundColor: paletteColors.btnPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guardarButtonText: {
+    color: paletteColors.onPrimary,
+    fontSize: 12,
+    fontFamily: font.semibold,
+  },
+  // Contacto WhatsApp (franja salvia del mock)
+  contactCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: spacing.lg,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: paletteColors.sageBg,
+  },
+  contactIcono: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: paletteColors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contactInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  // Tonos salvia del mock para los textos de contacto
+  contactTitulo: {
+    color: '#43594e',
+    fontSize: 13,
+    fontFamily: font.semibold,
+  },
+  contactTexto: {
+    color: '#718078',
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: font.regular,
+    marginTop: 4,
+  },
+  contactButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: '#cddbd3',
+    backgroundColor: paletteColors.card,
+  },
+  contactButtonText: {
+    color: '#587064',
+    fontSize: 11,
+    fontFamily: font.semibold,
+  },
   logoutButton: {
     marginTop: spacing.md,
   },
   formContainer: {
     ...cardStyle(paletteColors),
-    margin: spacing.xl,
+    margin: spacing.lg,
     padding: spacing.xl,
   },
   fieldRow: {
@@ -349,19 +639,19 @@ const makeStyles = (paletteColors) => StyleSheet.create({
   },
   label: {
     color: paletteColors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: font.semibold,
     marginBottom: spacing.sm,
   },
   input: {
     backgroundColor: paletteColors.inputBg,
-    borderColor: paletteColors.border,
-    borderWidth: 1.5,
+    borderColor: paletteColors.line,
+    borderWidth: 1,
     color: paletteColors.textPrimary,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-    fontSize: 16,
+    borderRadius: radius.sm,
+    fontSize: 15,
     fontFamily: font.regular,
     marginBottom: spacing.lg,
   },
@@ -381,27 +671,27 @@ const makeStyles = (paletteColors) => StyleSheet.create({
     marginTop: spacing.md,
   },
   saveButton: {
-    backgroundColor: paletteColors.primary,
+    backgroundColor: paletteColors.btnPrimary,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
   },
   saveButtonText: {
     color: paletteColors.onPrimary,
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: font.semibold,
   },
   cancelButton: {
     marginRight: spacing.md,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,
-    borderRadius: radius.pill,
-    borderWidth: 1.5,
-    borderColor: paletteColors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: paletteColors.line,
   },
   cancelButtonText: {
     color: paletteColors.textPrimary,
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: font.semibold,
   },
 });

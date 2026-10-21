@@ -25,7 +25,7 @@ app.use(express.json());
 // POST /auth/register - Registrar nuevo cliente
 app.post('/auth/register', (req, res) => {
   try {
-    const { nombre, email, password, telefono } = req.body;
+    const { nombre, email, password, telefono, genero } = req.body;
 
     if (!nombre || !email || !password) {
       return res.status(400).json({ 
@@ -47,21 +47,27 @@ app.post('/auth/register', (req, res) => {
     const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS) || 10;
     const passwordHash = bcrypt.hashSync(password, saltRounds);
 
+    // Género opcional para el saludo personalizado (hombre/mujer; vacío = neutro)
+    const generoNormalizado =
+      typeof genero === 'string' && ['hombre', 'mujer'].includes(genero.trim().toLowerCase())
+        ? genero.trim().toLowerCase()
+        : '';
+
     // Insertar usuario
     const stmt = db.prepare(
-      'INSERT INTO users (nombre, email, password_hash, telefono) VALUES (?, ?, ?, ?)'
+      'INSERT INTO users (nombre, email, password_hash, telefono, genero) VALUES (?, ?, ?, ?, ?)'
     );
-    const result = stmt.run(nombre, email, passwordHash, telefono || null);
+    const result = stmt.run(nombre, email, passwordHash, telefono || null, generoNormalizado);
 
     // Generar JWT token
     const jwtSecret = process.env.JWT_SECRET || 'bloomapp-super-secret-key-change-in-production-32chars';
     const token = jwt.sign({ id: Number(result.lastInsertRowid), email }, jwtSecret, { expiresIn: '24h' });
 
-    return res.status(201).json({ 
-      success: true, 
+    return res.status(201).json({
+      success: true,
       message: 'Usuario registrado exitosamente',
       token,
-      user: { id: Number(result.lastInsertRowid), nombre, email, telefono }
+      user: { id: Number(result.lastInsertRowid), nombre, email, telefono, genero: generoNormalizado }
     });
   } catch (err) {
     console.error('[ERROR] Register:', err.message);
@@ -136,7 +142,7 @@ app.post('/auth/logout', (req, res) => {
 // GET /auth/me - Devuelve el usuario autenticado (requiere JWT)
 app.get('/auth/me', authenticateToken, (req, res) => {
   try {
-    const user = db.prepare('SELECT id, email, nombre, telefono FROM users WHERE id = ?').get(req.user.id);
+    const user = db.prepare('SELECT id, email, nombre, telefono, genero FROM users WHERE id = ?').get(req.user.id);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -153,9 +159,9 @@ app.get('/auth/me', authenticateToken, (req, res) => {
   }
 });
 
-// PUT /auth/profile - Actualizar perfil del usuario autenticado (nombre, telefono)
+// PUT /auth/profile - Actualizar perfil del usuario autenticado (nombre, telefono, genero)
 app.put('/auth/profile', authenticateToken, (req, res) => {
-  const { nombre, telefono } = req.body || {};
+  const { nombre, telefono, genero } = req.body || {};
 
   try {
     if (nombre !== undefined) {
@@ -177,6 +183,16 @@ app.put('/auth/profile', authenticateToken, (req, res) => {
       }
     }
 
+    if (genero !== undefined) {
+      const g = String(genero).trim().toLowerCase();
+      if (!['hombre', 'mujer', ''].includes(g)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Género inválido'
+        });
+      }
+    }
+
     const updates = [];
     const values = [];
     if (nombre !== undefined) {
@@ -187,6 +203,10 @@ app.put('/auth/profile', authenticateToken, (req, res) => {
       updates.push('telefono = ?');
       const t = String(telefono ?? '').trim();
       values.push(t === '' ? null : t);
+    }
+    if (genero !== undefined) {
+      updates.push('genero = ?');
+      values.push(String(genero).trim().toLowerCase());
     }
 
     if (updates.length === 0) {
@@ -199,7 +219,7 @@ app.put('/auth/profile', authenticateToken, (req, res) => {
     updates.push('actualizado_en = CURRENT_TIMESTAMP');
     db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values, req.user.id);
 
-    const user = db.prepare('SELECT id, email, nombre, telefono FROM users WHERE id = ?').get(req.user.id);
+    const user = db.prepare('SELECT id, email, nombre, telefono, genero FROM users WHERE id = ?').get(req.user.id);
     return res.json({
       success: true,
       message: 'Perfil actualizado exitosamente',

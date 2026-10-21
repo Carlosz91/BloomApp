@@ -2,7 +2,17 @@ import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useFonts, Inter_400Regular, Inter_600SemiBold } from '@expo-google-fonts/inter';
+// Fuentes del diseño de referencia (branch móvil): DM Sans + Playfair Display.
+import {
+  useFonts,
+  DMSans_400Regular,
+  DMSans_500Medium,
+  DMSans_700Bold,
+} from '@expo-google-fonts/dm-sans';
+import {
+  PlayfairDisplay_600SemiBold,
+  PlayfairDisplay_600SemiBold_Italic,
+} from '@expo-google-fonts/playfair-display';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { ThemeProvider } from '../theme/ThemeContext';
 
@@ -28,7 +38,13 @@ function RootStack() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({ Inter_400Regular, Inter_600SemiBold });
+  const [fontsLoaded, fontError] = useFonts({
+    DMSans_400Regular,
+    DMSans_500Medium,
+    DMSans_700Bold,
+    PlayfairDisplay_600SemiBold,
+    PlayfairDisplay_600SemiBold_Italic,
+  });
 
   useEffect(() => {
     if (fontsLoaded || fontError) SplashScreen.hideAsync();

@@ -13,11 +13,19 @@ function initializeDatabase() {
       password_hash VARCHAR(255) NOT NULL,
       nombre VARCHAR(100) NOT NULL,
       telefono VARCHAR(20),
+      genero VARCHAR(10) NOT NULL DEFAULT '',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
   console.log('✅ Tabla "users" creada/verificada');
+
+  // Migración para DBs existentes: columna genero para el saludo personalizado
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN genero VARCHAR(10) NOT NULL DEFAULT ''");
+  } catch (e) {
+    // La columna ya existe (DB creada con esta versión)
+  }
 
   // Tabla services
   db.exec(`

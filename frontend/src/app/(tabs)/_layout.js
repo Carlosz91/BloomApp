@@ -20,19 +20,19 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: palette.primary,
-        tabBarInactiveTintColor: palette.textMuted,
-        tabBarLabelStyle: { fontFamily: font.semibold, fontSize: 12, marginTop: 2 },
+        // Gris inactivo del nav móvil del mock (no hay llave de paleta para él).
+        tabBarInactiveTintColor: '#91868c',
+        tabBarLabelStyle: { fontFamily: font.medium, fontSize: 11, marginTop: 2 },
         tabBarStyle: {
-          backgroundColor: palette.card,
-          borderTopWidth: 0,
+          // Barra móvil del mock: blanco casi opaco + borde superior de línea.
+          backgroundColor: 'rgba(255,253,251,0.97)',
+          borderTopWidth: 1,
+          borderTopColor: palette.line,
           height: 68 + bottom,
           paddingTop: 8,
           paddingBottom: bottom,
-          elevation: 12,
-          shadowColor: palette.shadow,
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.06,
-          shadowRadius: 12,
+          elevation: 0,
+          shadowOpacity: 0,
         },
       }}
     >

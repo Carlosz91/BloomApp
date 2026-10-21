@@ -24,7 +24,7 @@ export default function SignupScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(palette), [palette]);
-  const [form, setForm] = useState({ nombre: '', email: '', password: '', confirm: '' });
+  const [form, setForm] = useState({ nombre: '', email: '', password: '', confirm: '', genero: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState(null);
   const [errors, setErrors] = useState({});
@@ -50,6 +50,7 @@ export default function SignupScreen() {
         nombre: form.nombre.trim(),
         email: form.email.trim(),
         password: form.password,
+        genero: form.genero,
       });
       router.replace('/home');
     } catch {
@@ -142,6 +143,30 @@ export default function SignupScreen() {
             secureTextEntry: !showPassword,
           })}
 
+          <View style={styles.genderBlock}>
+            <Text style={styles.genderLabel}>¿CÓMO TE SALUDAMOS?</Text>
+            <View style={styles.genderRow}>
+              <TouchableOpacity
+                style={[styles.genderButton, form.genero === 'hombre' && styles.genderButtonActive]}
+                onPress={() => setField('genero')('hombre')}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.genderText, form.genero === 'hombre' && styles.genderTextActive]}>
+                  Hombre
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.genderButton, form.genero === 'mujer' && styles.genderButtonActive]}
+                onPress={() => setField('genero')('mujer')}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.genderText, form.genero === 'mujer' && styles.genderTextActive]}>
+                  Mujer
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <PrimaryButton label="Crear cuenta" onPress={handleSubmit} style={styles.submit} />
         </FadeInView>
 
@@ -219,6 +244,28 @@ const makeStyles = (palette) =>
       marginLeft: spacing.sm,
     },
     submit: { marginTop: spacing.md },
+    genderBlock: { marginBottom: spacing.sm },
+    genderLabel: {
+      color: palette.textMuted,
+      fontFamily: font.semibold,
+      fontSize: 12,
+      letterSpacing: 0.4,
+      marginBottom: spacing.sm,
+    },
+    genderRow: { flexDirection: 'row', gap: spacing.sm },
+    genderButton: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 48,
+      borderWidth: 1.5,
+      borderColor: 'transparent',
+      borderRadius: radius.lg,
+      backgroundColor: palette.background,
+    },
+    genderButtonActive: { borderColor: palette.primary, backgroundColor: palette.card },
+    genderText: { color: palette.textMuted, fontFamily: font.regular, fontSize: 15 },
+    genderTextActive: { color: palette.primary, fontFamily: font.semibold },
     footer: { alignItems: 'center', marginTop: spacing.xl },
     footerText: { color: palette.textMuted, fontFamily: font.regular, fontSize: 14 },
     link: { marginTop: spacing.sm, padding: spacing.sm },

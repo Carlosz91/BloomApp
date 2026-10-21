@@ -8,7 +8,7 @@ import { cardStyle, font, radius, spacing } from '../theme/tokens';
 import FadeInView from '../components/FadeInView';
 import { showSuccessToast, showErrorToast } from '../services/Notifications';
 import { API_BASE_URL } from '../config/api';
-import { formatGuaranies } from '../utils/format';
+import { formatColones } from '../utils/format';
 
 export default function MyAppointmentsScreen() {
   const { palette } = useTheme();
@@ -20,6 +20,8 @@ export default function MyAppointmentsScreen() {
 
   // Cargar citas del usuario desde API
   useEffect(() => {
+    let cancelled = false;
+
     const fetchAppointments = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/appointments`, {
@@ -37,14 +39,27 @@ export default function MyAppointmentsScreen() {
             duracion_minutos: a.servicio_duracion,
           },
         }));
-        setAppointments(mapped);
+        if (!cancelled) setAppointments(mapped);
       } catch (error) {
         console.error('Error fetching appointments:', error);
       }
     };
 
-    if (token) fetchAppointments();
-    else setAppointments([]);
+    // Carga dentro de una función interna: evita setState síncrono en el
+    // cuerpo del effect (react-hooks/set-state-in-effect).
+    const loadAppointments = () => {
+      if (token) {
+        fetchAppointments();
+      } else {
+        setAppointments([]);
+      }
+    };
+
+    loadAppointments();
+
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   // Filtrar citas basándose en la fecha actual
@@ -71,7 +86,7 @@ export default function MyAppointmentsScreen() {
           <View style={styles.citaInfo}>
             <View style={styles.citaMain}>
               <Text style={styles.serviceName}>{cita.service.nombre}</Text>
-              <Text style={styles.servicePrice}>{formatGuaranies(cita.service.precio)}</Text>
+              <Text style={styles.servicePrice}>{formatColones(cita.service.precio)}</Text>
             </View>
             <View style={[styles.badge, { backgroundColor: badgeColor + '1F' }]}>
               <View style={[styles.badgeDot, { backgroundColor: badgeColor }]} />
@@ -180,45 +195,50 @@ const makeStyles = (palette) => StyleSheet.create({
     backgroundColor: palette.background,
   },
   header: {
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
   },
   headerTitle: {
-    color: palette.textPrimary,
-    fontSize: 28,
-    lineHeight: 34,
+    color: palette.heading,
+    fontSize: 27,
+    lineHeight: 32,
     fontFamily: font.semibold,
+    letterSpacing: -0.9,
   },
   tabs: {
     flexDirection: 'row',
-    marginHorizontal: spacing.xl,
+    gap: spacing.xs,
+    marginHorizontal: spacing.lg,
     marginBottom: spacing.lg,
-    padding: 4,
-    borderRadius: radius.pill,
-    backgroundColor: palette.primaryTint,
   },
+  // Pestañas píldora del mock: activa ciruela, inactiva blanca con borde
   tabButton: {
     flex: 1,
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: 9,
     borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: palette.line,
+    backgroundColor: palette.card,
     alignItems: 'center',
   },
   tabButtonActive: {
     backgroundColor: palette.primary,
+    borderColor: palette.primary,
   },
   tabText: {
-    color: palette.primary,
-    fontSize: 14,
-    fontFamily: font.semibold,
+    color: palette.textMuted,
+    fontSize: 12,
+    fontFamily: font.medium,
   },
   tabTextActive: {
     color: palette.onPrimary,
+    fontFamily: font.semibold,
   },
   list: {
     flex: 1,
   },
   listContent: {
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
   },
   citaCard: {
@@ -235,26 +255,26 @@ const makeStyles = (palette) => StyleSheet.create({
     marginRight: spacing.md,
   },
   serviceName: {
-    color: palette.textPrimary,
-    fontSize: 16,
+    color: palette.heading,
+    fontSize: 15,
     fontFamily: font.semibold,
   },
   servicePrice: {
     color: palette.primary,
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: font.semibold,
     marginTop: 2,
   },
   fechaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
     marginTop: spacing.md,
   },
   fechaHora: {
     color: palette.textMuted,
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: font.regular,
-    marginLeft: spacing.xs + 2,
   },
   badge: {
     flexDirection: 'row',
@@ -270,20 +290,20 @@ const makeStyles = (palette) => StyleSheet.create({
     marginRight: 6,
   },
   badgeText: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: font.semibold,
   },
   cancelButton: {
     marginTop: spacing.md,
     paddingVertical: spacing.sm + 2,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: palette.error,
     alignItems: 'center',
   },
   cancelText: {
     color: palette.error,
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: font.semibold,
   },
   emptyState: {
@@ -294,17 +314,17 @@ const makeStyles = (palette) => StyleSheet.create({
     paddingBottom: spacing.xxl * 2,
   },
   emptyIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: palette.primaryTint,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: palette.plumSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.lg,
   },
   emptyStateText: {
     color: palette.textMuted,
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: font.regular,
   },
 });
