@@ -338,7 +338,7 @@ app.post('/auth/logout', (req, res) => {
 app.get('/auth/me', authenticateToken, async (req, res) => {
   try {
     const userResult = await queryOne(
-      'SELECT id, email, nombre, telefono, genero, terms_accepted_at, terms_version FROM users WHERE id = $1',
+      'SELECT id, email, nombre, telefono, genero, creado_en, terms_accepted_at, terms_version FROM users WHERE id = $1',
       [req.user.id]
     );
     if (!userResult.row) {

@@ -29,6 +29,7 @@ export default function ProfileScreen() {
     telefono: user?.telefono || '',
     email: user?.email || '',
     genero: user?.genero || '',
+    creado_en: user?.creado_en || null,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -52,6 +53,7 @@ export default function ProfileScreen() {
               telefono: data.user.telefono || '',
               email: data.user.email || '',
               genero: data.user.genero || '',
+              creado_en: data.user.creado_en || null,
             });
           }
         }
@@ -153,6 +155,9 @@ export default function ProfileScreen() {
   const initial = (profile.nombre || '?').trim().charAt(0).toUpperCase();
   const primerNombre = (profile.nombre || '').trim().split(/\s+/)[0] || '';
   const tituloSaludo = primerNombre ? `Hola, ${primerNombre}` : 'Hola';
+  // Membership year comes from the user's signup date in the DB; the static
+  // fallback only covers sessions created before the field existed.
+  const miembroDesde = profile.creado_en ? new Date(profile.creado_en).getFullYear() : null;
 
   return (
     <ScrollView
@@ -177,7 +182,9 @@ export default function ProfileScreen() {
           <Text style={styles.profileEmail}>{profile.email}</Text>
           <View style={styles.profileSince}>
             <Ionicons name="heart" size={12} color={paletteColors.rose} />
-            <Text style={styles.profileSinceTexto}>Parte de Bloom desde 2023</Text>
+            <Text style={styles.profileSinceTexto}>
+              {miembroDesde ? `Parte de Bloom desde ${miembroDesde}` : 'Parte de Bloom desde 2023'}
+            </Text>
           </View>
         </View>
       </FadeInView>
