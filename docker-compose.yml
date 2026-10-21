@@ -1,7 +1,7 @@
 # ==========================
 # BLOOMAPP - docker-compose.yml
 # ==========================
-# Backend  (Express + SQLite) -> http://localhost:3000
+# Backend  (Express + PostgreSQL) -> http://localhost:3000
 # Frontend (Expo Metro)       -> http://localhost:8081
 #
 # Uso:
@@ -9,7 +9,7 @@
 #   docker logs -f bloomapp-frontend   <- QR para Expo Go
 #   docker-compose down                <- detener todo
 #
-# La base de datos SQLite persiste en el volumen nombrado `bloomapp-db`.
+# La base de datos PostgreSQL persiste en el volumen nombrado `bloomapp-pg`.
 
 services:
   backend:
@@ -20,20 +20,39 @@ services:
     restart: unless-stopped
     environment:
       - PORT=3000
-      - NODE_ENV=development
+      - NODE_ENV=production
       - JWT_SECRET=bloomapp-super-secret-key-change-in-production-32chars
       - BCRYPT_SALT_ROUNDS=10
-      - DATABASE_URL=/app/data/database.sqlite
+      - DATABASE_URL=postgres://bloomapp:bloomapp@postgres:5432/bloomapp
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "3000:3000"
-    volumes:
-      - bloomapp-db:/app/data
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  postgres:
+    image: postgres:18-alpine
+    container_name: bloomapp-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=bloomapp
+      - POSTGRES_PASSWORD=bloomapp
+      - POSTGRES_DB=bloomapp
+    volumes:
+      # PG 18+ monta la raíz de datos (la imagen usa subdirs por versión)
+      - bloomapp-pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "bloomapp", "-d", "bloomapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   frontend:
     build:
@@ -48,13 +67,11 @@ services:
       - "19000:19000"
       - "19001:19001"
     environment:
-      # URL del API consignada en el bundle JS; debe ser la IP LAN del host
-      # para que el celular (misma red WiFi) la alcance. localhost NO funciona
-      # en el teléfono: resolvería al propio teléfono.
-      - EXPO_PUBLIC_API_URL=http://192.168.0.13:3000
-      # Hace que Expo anuncie exp://192.168.0.13:8081 (IP del PC) en vez de
-      # la IP interna del contenedor, para que Expo Go conecte al Metro real.
-      - REACT_NATIVE_PACKAGER_HOSTNAME=192.168.0.13
+      # IP LAN del host (DHCP puede cambiarla: editar .env, no este archivo)
+      - EXPO_PUBLIC_API_URL=http://${LAN_IP:-192.168.0.8}:3000
+      # Hace que Expo anuncie exp://<LAN_IP>:8081 (IP del PC) en vez de la IP
+      # interna del contenedor, para que Expo Go conecte al Metro real.
+      - REACT_NATIVE_PACKAGER_HOSTNAME=${LAN_IP:-192.168.0.8}
     volumes:
       # Código del proyecto en vivo; las rutas (src/app) deben quedar en la
       # raíz del contenedor para que CLI las detecte. El volumen nombrado
@@ -65,5 +82,5 @@ services:
     command: ["npx", "expo", "start", "-c"]
 
 volumes:
-  bloomapp-db:
+  bloomapp-pg:
   frontend_node_modules:
