@@ -1,10 +1,15 @@
+require('dotenv').config();
 const pg = require('pg');
 const { Pool, types } = pg;
 
-// PostgreSQL connection string (docker-compose provides it; local dev may
-// override DATABASE_URL, otherwise fall back to the local compose defaults).
-const connectionString =
-  process.env.DATABASE_URL || 'postgres://bloomapp:bloomapp@localhost:5432/bloomapp';
+// PostgreSQL connection string. Required in every environment: there is no
+// credentials fallback, so a missing config fails fast instead of silently
+// connecting with a guessable password.
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  console.error('[FATAL] DATABASE_URL env var is required (see .env.example)');
+  process.exit(1);
+}
 
 const pool = new Pool({ connectionString });
 
@@ -19,7 +24,26 @@ types.setTypeParser(types.builtins.TIMESTAMP, (val) => val);
 types.setTypeParser(types.builtins.TIMESTAMPTZ, (val) => val);
 
 // Create/verify tables. Idempotent; safe to call multiple times (memoized).
+// DDL runs on a dedicated short-lived pool built from MIGRATION_DATABASE_URL
+// (owner role) so the runtime pool (DATABASE_URL) can be a least-privilege
+// role with no DDL rights. Falls back to DATABASE_URL when unset.
+async function withMigrationPool(fn) {
+  const migrationPool = new Pool({
+    connectionString: process.env.MIGRATION_DATABASE_URL || connectionString,
+    max: 1
+  });
+  try {
+    return await fn(migrationPool);
+  } finally {
+    await migrationPool.end().catch(() => {});
+  }
+}
+
 async function runMigrations() {
+  await withMigrationPool(applyMigrations);
+}
+
+async function applyMigrations(pool) {
   // Table users - login credentials
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -93,7 +117,84 @@ async function runMigrations() {
     WHERE estado = 'booked';
   `);
 
-  console.log('✅ Tablas de PostgreSQL verificadas/creadas: users, services, appointments');
+  // Table sessions - server-side sessions backing access/refresh tokens.
+  // Refresh tokens are stored only as sha256 hex hashes. A rotation chain
+  // shares one family_id so reuse of a retired token can revoke the family.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      family_id UUID NOT NULL,
+      refresh_token_hash CHAR(64) NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      last_used_at TIMESTAMPTZ DEFAULT now(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      replaced_by UUID,
+      user_agent VARCHAR(255),
+      ip VARCHAR(64)
+    );
+  `);
+  await pool.query('CREATE INDEX IF NOT EXISTS ix_sessions_user_id ON sessions (user_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS ix_sessions_family_id ON sessions (family_id)');
+
+  // Table login_attempts - per-account brute-force throttle. `key` is
+  // sha256(lowercased email) so unknown emails are tracked without storing PII.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS login_attempts (
+      key CHAR(64) PRIMARY KEY,
+      failures INTEGER NOT NULL DEFAULT 0,
+      first_failure_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      locked_until TIMESTAMPTZ
+    );
+  `);
+
+  // Table password_resets - one-time 6-digit codes for "forgot password".
+  // Only an HMAC of the code is stored, never the code itself.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash CHAR(64) NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+  await pool.query('CREATE INDEX IF NOT EXISTS ix_password_resets_user_id ON password_resets (user_id)');
+
+  // Email ownership proof. NULL = unverified. Existing users are deliberately
+  // NOT grandfathered as verified: nobody has proven control of their mailbox.
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ');
+
+  // Table email_verifications - one-time 6-digit codes proving mailbox control.
+  // Mirrors password_resets: only an HMAC of the code is stored.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash CHAR(64) NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+  await pool.query('CREATE INDEX IF NOT EXISTS ix_email_verifications_user_id ON email_verifications (user_id)');
+
+  // Table oauth_nonces - server-issued, single-use nonces for Google sign-in.
+  // Only the sha256 of the nonce is stored.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_nonces (
+      nonce_hash CHAR(64) PRIMARY KEY,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ
+    );
+  `);
+
+  console.log('✅ Tablas de PostgreSQL verificadas/creadas: users, services, appointments, sessions, login_attempts, password_resets, email_verifications, oauth_nonces');
 }
 
 let initPromise = null;
@@ -133,4 +234,4 @@ async function queryMany(text, params) {
   return result.rows;
 }
 
-module.exports = { pool, query, queryOne, queryMany, initializeTables };
+module.exports = { pool, query, queryOne, queryMany, initializeTables, withMigrationPool };

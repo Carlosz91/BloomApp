@@ -20,10 +20,15 @@ services:
     restart: unless-stopped
     environment:
       - PORT=3000
-      - NODE_ENV=production
-      - JWT_SECRET=bloomapp-super-secret-key-change-in-production-32chars
-      - BCRYPT_SALT_ROUNDS=10
-      - DATABASE_URL=postgres://bloomapp:bloomapp@postgres:5432/bloomapp
+      # TEMPORARY: development logs the password-reset code to the console
+      # (no SMTP configured). Set back to production before deploying.
+      - NODE_ENV=development
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      # Runtime connection: least-privilege role once APP_DATABASE_URL is set
+      # (see scripts/db-roles.sql); falls back to the owner until then.
+      - DATABASE_URL=${APP_DATABASE_URL:-postgres://bloomapp:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/bloomapp}
+      # Boot-time DDL/seeding always runs as the owner.
+      - MIGRATION_DATABASE_URL=postgres://bloomapp:${POSTGRES_PASSWORD}@postgres:5432/bloomapp
       # OAuth web client ID (Google Cloud Console); empty until configured
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
     depends_on:
@@ -44,7 +49,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=bloomapp
-      - POSTGRES_PASSWORD=bloomapp
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       - POSTGRES_DB=bloomapp
     volumes:
       # PG 18+ monta la raíz de datos (la imagen usa subdirs por versión)

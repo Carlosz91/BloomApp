@@ -1,0 +1,39 @@
+# BloomApp API reverse proxy (Caddy, automatic HTTPS via Let's Encrypt).
+# Template: not used by the development docker-compose.yml.
+#
+# Required env (see deploy/docker-compose.prod.yml):
+#   API_DOMAIN  public hostname of the API, e.g. api.example.com (DNS A/AAAA
+#               record must point at this host; ports 80/443 must be open)
+#
+# Only the API is proxied. The web app is built separately as static files
+# (npx expo export -p web) and hosted elsewhere; it is not served from here.
+
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "geolocation=(), camera=(), microphone=()"
+		-Server
+	}
+
+	# Small JSON API: cap request bodies well above express.json's 10kb limit.
+	request_body {
+		max_size 64KB
+	}
+
+	reverse_proxy backend:3000 {
+		# Backend runs with TRUST_PROXY=1 and reads the client IP from this.
+		header_up X-Forwarded-For {remote_host}
+		health_uri /health
+		health_interval 30s
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
