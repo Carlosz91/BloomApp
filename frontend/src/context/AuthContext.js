@@ -1,48 +1,125 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as secureStorage from '../services/secureStorage';
 import { showErrorToast, showSuccessToast } from '../services/Notifications';
 import { API_BASE_URL } from '../config/api';
 
 // Idle timeout for ending a session with no user interaction at all. Keep in
-// sync with the backend SESSION_TTL_SECONDS (sliding safety net): the backend
-// only expires on the next request, while this timer IS the proactive logout
-// that lands the user on login without touching anything.
+// sync with the backend SESSION_IDLE_SECONDS (enforced server-side): the
+// backend only expires on the next request, while this timer IS the proactive
+// logout that lands the user on login without touching anything.
 const SESSION_INACTIVITY_MS = 180 * 1000;
 
 // Context for JWT token and user auth state
 const AuthContext = createContext();
 
 // ---- Session plumbing (module scope) ---------------------------------------
-// The backend runs sliding inactivity sessions: every authenticated response
-// carries a freshly signed token in the `X-Auth-Token` header and activity is
-// the only thing keeping the session alive. This wrapper adopts the renewed
-// token transparently and logs out when an authenticated call expires, so no
-// screen needs to know about the mechanism. Also mirrors the terms version
-// constant in OnboardingScreen (bump both together).
+// The backend issues a short-lived access token plus a rotating refresh token.
+// This wrapper refreshes transparently: when an authenticated call fails with
+// 401 `token_expired`, it performs ONE shared POST /auth/refresh, stores the
+// new pair and retries the original request once. A failed refresh, or any 401
+// `session_invalid`, ends the session. No screen needs to know about the
+// mechanism. Also mirrors the terms version constant in OnboardingScreen
+// (bump both together).
 const TERMS_VERSION = 'v1';
-let adoptFreshSessionToken = null;
+const TOKEN_KEY = 'bloomapp_token';
+const REFRESH_TOKEN_KEY = 'bloomapp_refresh_token';
 let handleSessionExpired = null;
+let adoptRefreshedToken = null;
+let refreshInFlight = null;
+const baseFetch = globalThis.__bloomOriginalFetch || globalThis.fetch;
+
+// Single in-flight refresh shared by every concurrent caller. Resolves to
+// { status: 'ok', token } | { status: 'rejected' } | { status: 'network' }.
+const refreshSession = () => {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const refreshToken = await secureStorage.getItem(REFRESH_TOKEN_KEY);
+        if (!refreshToken) return { status: 'rejected' };
+        let res;
+        try {
+          res = await baseFetch(`${API_BASE_URL}/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken })
+          });
+        } catch {
+          return { status: 'network' };
+        }
+        if (res.status >= 500) return { status: 'network' };
+        if (!res.ok) return { status: 'rejected' };
+        const data = await res.json();
+        if (!data.token || !data.refreshToken) return { status: 'rejected' };
+        await secureStorage.setItem(TOKEN_KEY, data.token);
+        await secureStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
+        if (adoptRefreshedToken) adoptRefreshedToken(data.token);
+        return { status: 'ok', token: data.token };
+      } catch {
+        return { status: 'network' };
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+};
+
+// Copy of the request init with the Authorization header replaced.
+const withAuthorization = (init, token) => {
+  const headers = init.headers;
+  if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+    const copy = new Headers(headers);
+    copy.set('Authorization', `Bearer ${token}`);
+    return { ...init, headers: copy };
+  }
+  const copy = {};
+  Object.keys(headers || {}).forEach((name) => {
+    if (!/^authorization$/i.test(name)) copy[name] = headers[name];
+  });
+  copy.Authorization = `Bearer ${token}`;
+  return { ...init, headers: copy };
+};
+
+const readErrorCode = async (response) => {
+  try {
+    const body = await response.clone().json();
+    return body && body.code;
+  } catch {
+    return null;
+  }
+};
 
 if (!globalThis.__bloomSessionFetchInstalled) {
   globalThis.__bloomSessionFetchInstalled = true;
+  globalThis.__bloomOriginalFetch = globalThis.fetch;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const response = await originalFetch(input, init);
     // Only authenticated calls participate in the session lifecycle.
     const initHeaders = (init && init.headers) || null;
-    const headerNames = initHeaders ? Object.keys(initHeaders).map(String) : [];
+    const headerNames = initHeaders
+      ? (typeof Headers !== 'undefined' && initHeaders instanceof Headers
+          ? Array.from(initHeaders.keys())
+          : Object.keys(initHeaders).map(String))
+      : [];
     const hadAuthHeader = headerNames.some((name) => /authorization/i.test(name));
-    if (hadAuthHeader) {
-      const freshToken = response.headers?.get?.('x-auth-token');
-      // 401/403 on an authenticated call means the inactivity window closed
-      // (or the token was rejected): the session is over, log out.
-      if (response.status === 401 || response.status === 403) {
-        if (handleSessionExpired) handleSessionExpired();
-      } else if (freshToken && adoptFreshSessionToken) {
-        adoptFreshSessionToken(freshToken);
+    if (!hadAuthHeader || response.status !== 401) return response;
+
+    const code = await readErrorCode(response);
+    if (code === 'token_expired') {
+      const refreshed = await refreshSession();
+      if (refreshed.status === 'ok') {
+        // Retry the original request exactly once with the new access token.
+        const retry = await originalFetch(input, withAuthorization(init, refreshed.token));
+        if (retry.status === 401 && handleSessionExpired) handleSessionExpired();
+        return retry;
       }
+      // Transient network/server trouble: keep the session, surface the 401.
+      if (refreshed.status === 'network') return response;
     }
+    if (handleSessionExpired) handleSessionExpired();
     return response;
   };
 }
@@ -77,7 +154,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const loadAuthState = async () => {
       try {
-        const storedToken = await AsyncStorage.getItem('bloomapp_token');
+        const storedToken = await secureStorage.getItem(TOKEN_KEY);
         const storedUser = await AsyncStorage.getItem('bloomapp_user');
         const parsedUser = storedUser ? JSON.parse(storedUser) : null;
 
@@ -95,22 +172,19 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    // Plug the sliding-session plumbing into this mounted provider.
-    adoptFreshSessionToken = async (freshToken) => {
-      if (!freshToken) return;
-      setToken(freshToken);
-      AsyncStorage.setItem('bloomapp_token', freshToken).catch((error) =>
-        console.error('Error persisting sliding token', error)
-      );
+    // Plug the session plumbing into this mounted provider.
+    adoptRefreshedToken = (freshToken) => {
+      if (freshToken) setToken(freshToken);
     };
     handleSessionExpired = () => {
-      AsyncStorage.removeItem('bloomapp_token').catch(() => {});
+      secureStorage.removeItem(TOKEN_KEY).catch(() => {});
+      secureStorage.removeItem(REFRESH_TOKEN_KEY).catch(() => {});
       AsyncStorage.removeItem('bloomapp_user').catch(() => {});
       setToken(null);
       setUser(null);
     };
     return () => {
-      adoptFreshSessionToken = null;
+      adoptRefreshedToken = null;
       handleSessionExpired = null;
     };
   }, []);
@@ -195,7 +269,8 @@ export const AuthProvider = ({ children }) => {
       const data = await res.json();
       setToken(data.token);
       setUser(data.user);
-      await AsyncStorage.setItem('bloomapp_token', data.token);
+      await secureStorage.setItem(TOKEN_KEY, data.token);
+      if (data.refreshToken) await secureStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
       await AsyncStorage.setItem('bloomapp_user', JSON.stringify(data.user));
       syncTermsAcceptance(data.token, data.user);
     } else {
@@ -231,7 +306,8 @@ export const AuthProvider = ({ children }) => {
       const data = await res.json();
       setToken(data.token);
       setUser(data.user);
-      await AsyncStorage.setItem('bloomapp_token', data.token);
+      await secureStorage.setItem(TOKEN_KEY, data.token);
+      if (data.refreshToken) await secureStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
       await AsyncStorage.setItem('bloomapp_user', JSON.stringify(data.user));
       syncTermsAcceptance(data.token, data.user);
     } else {
@@ -264,7 +340,8 @@ export const AuthProvider = ({ children }) => {
       const data = await res.json();
       setToken(data.token);
       setUser(data.user);
-      await AsyncStorage.setItem('bloomapp_token', data.token);
+      await secureStorage.setItem(TOKEN_KEY, data.token);
+      if (data.refreshToken) await secureStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
       await AsyncStorage.setItem('bloomapp_user', JSON.stringify(data.user));
       syncTermsAcceptance(data.token, data.user);
     } else {
@@ -278,7 +355,24 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    await AsyncStorage.removeItem('bloomapp_token');
+    // Best-effort server-side revocation BEFORE clearing local state. Network
+    // errors and slow servers must never trap the user in a logged-in UI.
+    try {
+      const currentToken = (await secureStorage.getItem(TOKEN_KEY)) || token;
+      if (currentToken) {
+        await Promise.race([
+          fetch(`${API_BASE_URL}/auth/logout`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${currentToken}` }
+          }),
+          new Promise((resolve) => setTimeout(resolve, 3000))
+        ]);
+      }
+    } catch {
+      // ignored on purpose
+    }
+    await secureStorage.removeItem(TOKEN_KEY);
+    await secureStorage.removeItem(REFRESH_TOKEN_KEY);
     await AsyncStorage.removeItem('bloomapp_user');
     setToken(null);
     setUser(null);

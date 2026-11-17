@@ -32,6 +32,7 @@ function RootStack() {
       </Stack.Protected>
       <Stack.Protected guard={!!token}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="verify-email" />
       </Stack.Protected>
     </Stack>
   );

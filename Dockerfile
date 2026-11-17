@@ -17,7 +17,12 @@ RUN npm install --no-audit --no-fund
 RUN node -e "const {Pool}=require('pg'); new Pool(); console.log('OK: pg loaded')"
 
 # Copy the backend source
-COPY src/ ./src/
+COPY --chown=node:node src/ ./src/
+
+# Run as the unprivileged user shipped with the node image. node_modules was
+# installed as root and is only read at runtime; /app itself stays root-owned
+# (the app never writes to disk).
+USER node
 
 EXPOSE 3000
 

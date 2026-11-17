@@ -1,0 +1,93 @@
+# BloomApp production stack TEMPLATE: postgres + backend + Caddy (HTTPS).
+# Not used by development and not run as part of the repo checks.
+#
+# The web build is NOT part of this stack: export it as static files
+#   cd frontend && npx expo export -p web
+# and host the `dist/` folder on any static host/CDN. Set CLIENT_ORIGIN below
+# to that site's origin (e.g. https://app.example.com) so browser CORS works.
+# Native apps need no CORS and talk to https://$API_DOMAIN directly.
+#
+# Start (from the repo root, with the variables below exported or in an env file
+# kept OUT of git, passed via --env-file):
+#   docker compose -f deploy/docker-compose.prod.yml --env-file prod.env up -d --build
+#
+# One-time, after the first start: create the least-privilege role, then set
+# APP_DB_PASSWORD in the env and re-run `up -d`:
+#   docker compose -f deploy/docker-compose.prod.yml exec -T postgres \
+#     psql -U bloomapp -d bloomapp -v ON_ERROR_STOP=1 \
+#     -v app_password="$APP_DB_PASSWORD" < scripts/db-roles.sql
+#
+# Required variables (no defaults on purpose):
+#   API_DOMAIN, POSTGRES_PASSWORD, APP_DB_PASSWORD, JWT_SECRET, CLIENT_ORIGIN,
+#   GOOGLE_CLIENT_ID (may be empty), SMTP_URL, MAIL_FROM
+# APP_DB_PASSWORD must be URL-safe (letters, digits, - . _ ~).
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - API_DOMAIN=${API_DOMAIN:?API_DOMAIN is required}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # No published ports: reachable only through Caddy on the internal network.
+    expose:
+      - "3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - TRUST_PROXY=1
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - CLIENT_ORIGIN=${CLIENT_ORIGIN:?CLIENT_ORIGIN is required}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      # Runtime: least-privilege role. Boot-time DDL/seeding: owner role.
+      - DATABASE_URL=postgres://bloomapp_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}@postgres:5432/bloomapp
+      - MIGRATION_DATABASE_URL=postgres://bloomapp:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/bloomapp
+      - SMTP_URL=${SMTP_URL:?SMTP_URL is required}
+      - MAIL_FROM=${MAIL_FROM:?MAIL_FROM is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=bloomapp
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_DB=bloomapp
+    # No published ports: only the backend reaches it on the internal network.
+    volumes:
+      - bloomapp-pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "bloomapp", "-d", "bloomapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  bloomapp-pg:
+  caddy_data:
+  caddy_config:

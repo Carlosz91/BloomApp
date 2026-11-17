@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -15,8 +15,8 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
-import * as Crypto from 'expo-crypto';
 import { useAuth } from '../context/AuthContext';
+import { API_BASE_URL } from '../config/api';
 import { useTheme } from '../theme/ThemeContext';
 import { font, radius, softShadow, spacing } from '../theme/tokens';
 import FadeInView from '../components/FadeInView';
@@ -31,6 +31,9 @@ WebBrowser.maybeCompleteAuthSession();
 // backend endpoint. The button is rendered only for web + configured client.
 const GOOGLE_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '';
 const GOOGLE_ENABLED = Platform.OS === 'web' && Boolean(GOOGLE_CLIENT_ID);
+// Server nonces live 10 minutes; refresh a little earlier so a user who sits
+// on the login screen never submits an expired one.
+const GOOGLE_NONCE_REFRESH_MS = 8 * 60 * 1000;
 const GOOGLE_DISCOVERY = {
   authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
   tokenEndpoint: 'https://oauth2.googleapis.com/token',
@@ -61,10 +64,16 @@ function GoogleSignInButton({ palette, styles, busy, nonce, onIdToken }) {
     GOOGLE_DISCOVERY
   );
 
+  // Submit each id_token exactly once. `onIdToken` changes identity on every
+  // parent render, so without this guard the effect re-fires while the Google
+  // response is still 'success' and resubmits the same token; the nonce is
+  // single-use, so every resubmission after the first would be rejected.
+  const submittedTokenRef = useRef('');
   useEffect(() => {
-    if (response?.type === 'success' && response.params?.id_token) {
-      onIdToken(response.params.id_token, nonce);
-    }
+    const idToken = response?.type === 'success' ? response.params?.id_token : '';
+    if (!idToken || submittedTokenRef.current === idToken) return;
+    submittedTokenRef.current = idToken;
+    onIdToken(idToken, nonce);
   }, [response, onIdToken, nonce]);
 
   const disabled = busy || !request;
@@ -97,25 +106,34 @@ export default function LoginScreen() {
   const [googleBusy, setGoogleBusy] = useState(false);
   const [googleNonce, setGoogleNonce] = useState('');
 
-  // Google requires a nonce for implicit id_token flows. It is generated
-  // fresh for every screen load and binds the token to this browser
-  // session, letting the backend detect captured-token replays.
+  // Google requires a nonce for implicit id_token flows. It is issued by the
+  // backend (single-use, short-lived) so a captured token cannot be replayed
+  // or forged against us. Any failure just keeps the Google button hidden.
+  const nonceRequestId = useRef(0);
+  const fetchGoogleNonce = useCallback(async () => {
+    const requestId = ++nonceRequestId.current;
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/google/nonce`);
+      if (!res.ok) throw new Error('nonce request failed');
+      const data = await res.json();
+      if (requestId === nonceRequestId.current) {
+        setGoogleNonce(typeof data?.nonce === 'string' ? data.nonce : '');
+      }
+    } catch {
+      if (requestId === nonceRequestId.current) setGoogleNonce('');
+    }
+  }, []);
+
   useEffect(() => {
     if (!GOOGLE_ENABLED) return undefined;
-    let cancelled = false;
-    Crypto.getRandomBytesAsync(16).then((bytes) => {
-      if (!cancelled) {
-        setGoogleNonce(
-          Array.from(bytes)
-            .map((byte) => byte.toString(16).padStart(2, '0'))
-            .join('')
-        );
-      }
-    });
+    const first = setTimeout(fetchGoogleNonce, 0);
+    const timer = setInterval(fetchGoogleNonce, GOOGLE_NONCE_REFRESH_MS);
     return () => {
-      cancelled = true;
+      clearTimeout(first);
+      clearInterval(timer);
+      nonceRequestId.current += 1; // ignore any in-flight response
     };
-  }, []);
+  }, [fetchGoogleNonce]);
 
   const togglePasswordVisibility = () => setShowPassword(!showPassword);
 
@@ -130,11 +148,13 @@ export default function LoginScreen() {
     }
   };
 
-  // Recibe el id_token ya emitido por Google junto con el nonce generado
-  // en esta misma carga de pantalla, y los intercambia por una sesión
-  // BloomApp en el backend (AuthContext maneja errores con toast).
+  // Recibe el id_token ya emitido por Google junto con el nonce que pidió
+  // este flujo, y los intercambia por una sesión BloomApp en el backend
+  // (AuthContext maneja errores con toast). El nonce es de un solo uso: se
+  // descarta y se pide uno nuevo después de cada intento.
   const handleGoogleIdToken = async (idToken, nonce) => {
     setGoogleBusy(true);
+    setGoogleNonce('');
     try {
       await loginWithGoogle({ idToken, nonce });
       router.replace('/home');
@@ -142,6 +162,7 @@ export default function LoginScreen() {
       // Error ya notificado al usuario desde AuthContext
     } finally {
       setGoogleBusy(false);
+      fetchGoogleNonce();
     }
   };
 
@@ -218,6 +239,14 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
+          <TouchableOpacity
+            style={styles.forgotLink}
+            onPress={() => router.push('/forgot-password')}
+            hitSlop={8}
+          >
+            <Text style={styles.forgotLinkText}>¿Olvidaste tu contraseña?</Text>
+          </TouchableOpacity>
+
           {/* Botón de login */}
           <PrimaryButton
             label="Iniciar sesión"
@@ -237,6 +266,7 @@ export default function LoginScreen() {
                 <View style={styles.dividerLine} />
               </View>
               <GoogleSignInButton
+                key={googleNonce}
                 palette={palette}
                 styles={styles}
                 busy={googleBusy}
@@ -333,6 +363,8 @@ const makeStyles = (palette) =>
     },
     togglePassword: { paddingLeft: spacing.sm },
     loginButton: { marginTop: spacing.md },
+    forgotLink: { alignSelf: 'flex-end', paddingVertical: spacing.xs },
+    forgotLinkText: { color: palette.primary, fontFamily: font.semibold, fontSize: 14 },
     googleSection: { marginTop: spacing.lg },
     orDivider: {
       flexDirection: 'row',

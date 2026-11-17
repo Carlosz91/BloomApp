@@ -18,12 +18,13 @@ const defaultServices = [
 // Insert each service only if it does not exist yet (by name).
 // COUNT(*) is cast to int so the comparison stays numeric (bigint arrives
 // as a string from node-postgres by default).
-async function seedDefaultServices() {
+// Runs on the migration (owner) pool so the runtime role needs no seeding rights.
+async function seedDefaultServices(pool) {
   let inserted = 0;
   for (const s of defaultServices) {
-    const result = await db.queryOne('SELECT COUNT(*)::int AS cnt FROM services WHERE nombre = $1', [s.nombre]);
-    if (result.row.cnt === 0) {
-      await db.query(
+    const result = await pool.query('SELECT COUNT(*)::int AS cnt FROM services WHERE nombre = $1', [s.nombre]);
+    if (result.rows[0].cnt === 0) {
+      await pool.query(
         'INSERT INTO services (nombre, descripcion, precio, duracion_minutos, categoria, activo) VALUES ($1, $2, $3, $4, $5, TRUE)',
         [s.nombre, s.descripcion, s.precio, s.duracion_minutos, s.categoria]
       );
@@ -39,7 +40,7 @@ async function initializeDatabase() {
   await db.initializeTables();
   console.log('✅ Tablas verificadas/creadas en PostgreSQL');
 
-  const inserted = await seedDefaultServices();
+  const inserted = await db.withMigrationPool(seedDefaultServices);
   console.log(inserted === 0 ? 'ℹ️ Catálogo de servicios completo' : `✅ Catálogo de servicios: ${inserted} servicio(s) insertado(s)`);
 
   console.log('\n🎉 Base de datos inicializada exitosamente!');
