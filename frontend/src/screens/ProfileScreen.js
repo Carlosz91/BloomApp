@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Switch, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
+import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
@@ -26,6 +27,10 @@ const PREFERENCIAS_FILAS = [
 
 export default function ProfileScreen() {
   const { logout, user, updateUser, token } = useAuth();
+  const router = useRouter();
+  // Only an explicit false from the server means unverified (cached users
+  // from older sessions have no flag yet).
+  const emailUnverified = user?.email_verified === false;
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const paletteColors = palette;
@@ -83,6 +88,9 @@ export default function ProfileScreen() {
               genero: data.user.genero || '',
               creado_en: data.user.creado_en || null,
             });
+            if (typeof data.user.email_verified === 'boolean') {
+              updateUser({ email_verified: data.user.email_verified });
+            }
           }
         }
       } catch (error) {
@@ -93,6 +101,8 @@ export default function ProfileScreen() {
     return () => {
       active = false;
     };
+    // updateUser is recreated on every render; depending on it would refetch in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const validateProfile = () => {
@@ -229,6 +239,15 @@ export default function ProfileScreen() {
           </View>
           <Text style={styles.profileNombre}>{profile.nombre}</Text>
           <Text style={styles.profileEmail}>{profile.email}</Text>
+          {emailUnverified && (
+            <View style={styles.unverifiedRow}>
+              <Ionicons name="alert-circle-outline" size={14} color={paletteColors.error} />
+              <Text style={styles.unverifiedText}>Correo sin verificar</Text>
+              <TouchableOpacity onPress={() => router.push('/verify-email')} hitSlop={8}>
+                <Text style={styles.unverifiedLink}>Verificar correo</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <View style={styles.profileSince}>
             <Ionicons name="heart" size={12} color={paletteColors.rose} />
             <Text style={styles.profileSinceTexto}>
@@ -527,6 +546,25 @@ const makeStyles = (paletteColors) => StyleSheet.create({
     fontSize: 12,
     fontFamily: font.regular,
     marginTop: 2,
+  },
+  unverifiedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  unverifiedText: {
+    color: paletteColors.error,
+    fontSize: 11,
+    fontFamily: font.regular,
+  },
+  unverifiedLink: {
+    color: paletteColors.primary,
+    fontSize: 11,
+    fontFamily: font.semibold,
+    textDecorationLine: 'underline',
   },
   profileSince: {
     flexDirection: 'row',

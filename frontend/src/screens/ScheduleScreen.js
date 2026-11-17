@@ -230,7 +230,15 @@ const bookAppointment = async () => {
         });
         router.push('/appointments');
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
+        if (res.status === 403 && err.code === 'email_unverified') {
+          showErrorToast({
+            title: 'Verificá tu correo',
+            description: err.message || 'Verificá tu correo para agendar citas',
+          });
+          router.push('/verify-email');
+          return;
+        }
         // Toast error
         showErrorToast({
           title: 'Error al agendar',

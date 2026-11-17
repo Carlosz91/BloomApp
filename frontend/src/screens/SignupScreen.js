@@ -52,7 +52,8 @@ export default function SignupScreen() {
         password: form.password,
         genero: form.genero,
       });
-      router.replace('/home');
+      // New accounts start unverified: offer the code screen (skippable).
+      router.replace({ pathname: '/verify-email', params: { from: 'register' } });
     } catch {
       // Error ya notificado al usuario desde AuthContext
     }
